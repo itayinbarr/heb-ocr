@@ -140,3 +140,34 @@ def test_mixed_dataset_widths_cover_every_item():
     widths = dataset.widths(np.array([100] * 5))
     assert len(widths) == len(dataset) == 7
     assert widths[-2:].tolist() == [120, 300]
+
+
+def test_glyph_bank_measures_real_letter_proportions():
+    """Hebrew letters are not all one height, and scaling them as if they were
+    drew yod at twice its real size in a fifth of the training data."""
+    from hebocr.data.glyphs import GlyphBank
+
+    tall = [np.zeros((150, 60), np.uint8)]
+    plain = [np.zeros((100, 60), np.uint8)]
+    small = [np.zeros((48, 20), np.uint8)]
+    bank = GlyphBank(glyphs={"ל": tall, "א": plain, "ב": plain, "י": small})
+
+    assert bank.height_ratio["א"] == 1.0
+    assert bank.height_ratio["י"] < 0.6      # yod is a small, high mark
+    assert bank.height_ratio["ל"] > 1.4      # lamed is the one true ascender
+
+
+def test_descenders_are_drawn_below_the_baseline():
+    from hebocr.data.glyphs import GlyphBank, compose_line
+
+    solid = [np.zeros((100, 60), np.uint8)]
+    bank = GlyphBank(glyphs={"א": solid, "ן": [np.zeros((147, 30), np.uint8)]})
+
+    plain_img, _ = compose_line(bank, "א", np.random.default_rng(0))
+    desc_img, _ = compose_line(bank, "ן", np.random.default_rng(0))
+
+    def lowest_ink(image):
+        rows = np.where(np.asarray(image).min(axis=1) < 128)[0]
+        return int(rows.max()) if len(rows) else 0
+
+    assert lowest_ink(desc_img) > lowest_ink(plain_img)
