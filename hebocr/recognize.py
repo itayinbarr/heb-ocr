@@ -6,7 +6,7 @@ import torch
 from PIL import Image
 
 from .charset import Charset
-from .data.transforms import preprocess
+from .data.transforms import LINE_HEIGHT, preprocess
 from .decode import beam_decode, greedy_confidence, greedy_decode
 from .models.htr_vt import build_model
 
@@ -22,6 +22,7 @@ class Recognizer:
         lm_weight: float = 0.4,
         beam_width: int = 0,
         length_bonus: float = 0.6,
+        tta: int = 0,
     ):
         """`beam_width` of 0 means greedy decoding; anything else beam-searches.
 
@@ -32,6 +33,7 @@ class Recognizer:
         self.lm_weight = lm_weight
         self.beam_width = beam_width
         self.length_bonus = length_bonus
+        self.tta = tta
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = torch.device(device)
@@ -102,6 +104,46 @@ class Recognizer:
             return ordered_texts, [confs[i] for i in range(len(images))]
         return ordered_texts
 
+    # Horizontal rescalings used for test-time augmentation. Real hands vary
+    # widely in how tightly they pack characters, and the model's reading of a
+    # line genuinely changes with that spacing; these bracket the range.
+    TTA_SCALES = (1.0, 0.82, 1.22, 0.68, 1.45)
+
+    @torch.no_grad()
+    def read_tta(self, images: list[Image.Image], batch_size: int = 12):
+        """Read each line at several horizontal scales, keep the most confident.
+
+        Not averaged: CTC outputs at different scales have different numbers of
+        time steps, so their logits do not line up and cannot be pooled
+        frame-by-frame. Selecting whole hypotheses by mean best-path probability
+        sidesteps the alignment problem entirely.
+        """
+        n_views = max(1, min(self.tta or 1, len(self.TTA_SCALES)))
+        if n_views == 1:
+            return self.read(images, batch_size=batch_size)
+
+        best_text = [""] * len(images)
+        best_score = [float("-inf")] * len(images)
+
+        for scale in self.TTA_SCALES[:n_views]:
+            if scale == 1.0:
+                views = images
+            else:
+                views = [
+                    im.resize(
+                        (max(8, int(im.width * scale)), im.height), Image.BICUBIC
+                    )
+                    for im in images
+                ]
+            texts, confs = self.read(views, batch_size=batch_size, return_confidence=True)
+            for i, (text, conf) in enumerate(zip(texts, confs)):
+                # An empty read is never preferable to a non-empty one.
+                score = conf if text.strip() else float("-inf")
+                if score > best_score[i]:
+                    best_score[i], best_text[i] = score, text
+
+        return best_text
+
     @torch.no_grad()
     def read_page(self, image: Image.Image, min_confidence: float = 0.0, **segment_kwargs):
         """Segment a full page and read it. Returns (transcript, per-line records).
@@ -116,7 +158,11 @@ class Recognizer:
         if not crops:
             return "", []
 
-        texts, confs = self.read(crops, return_confidence=True)
+        if self.tta and self.tta > 1:
+            texts = self.read_tta(crops)
+            _, confs = self.read(crops, return_confidence=True)
+        else:
+            texts, confs = self.read(crops, return_confidence=True)
         records = [
             {
                 "text": t, "confidence": c,

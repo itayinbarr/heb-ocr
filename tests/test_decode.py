@@ -86,3 +86,44 @@ def test_language_model_can_change_the_chosen_path():
         logprobs, torch.tensor([4]), charset, beam_width=8, lm=lm, lm_weight=2.0, length_bonus=0.0
     )
     assert decoded[0].endswith("ם")
+
+
+def test_tta_disabled_matches_a_plain_read(tmp_path):
+    """tta=0 or 1 must be exactly the ordinary path, not a near-copy of it."""
+    import torch as t
+
+    from hebocr.charset import Charset as CS
+    from hebocr.models.htr_vt import build_model
+    from hebocr.recognize import Recognizer
+    from PIL import Image
+    import numpy as np
+
+    charset = CS.default()
+    model = build_model(charset.n_classes, "small", mask_ratio=0.0)
+    path = tmp_path / "ck.pt"
+    t.save({"model": model.state_dict(), "charset": charset.chars,
+            "config": {"size": "small"}, "epoch": 0}, path)
+
+    images = [Image.fromarray(np.full((64, 200), 200, np.uint8), mode="L") for _ in range(3)]
+    recognizer = Recognizer(path, device="cpu", tta=1)
+    assert recognizer.read_tta(images) == recognizer.read(images)
+
+
+def test_tta_returns_one_string_per_image(tmp_path):
+    import numpy as np
+    import torch as t
+    from PIL import Image
+
+    from hebocr.charset import Charset as CS
+    from hebocr.models.htr_vt import build_model
+    from hebocr.recognize import Recognizer
+
+    charset = CS.default()
+    model = build_model(charset.n_classes, "small", mask_ratio=0.0)
+    path = tmp_path / "ck.pt"
+    t.save({"model": model.state_dict(), "charset": charset.chars,
+            "config": {"size": "small"}, "epoch": 0}, path)
+
+    images = [Image.fromarray(np.full((64, 300), 180, np.uint8), mode="L") for _ in range(4)]
+    out = Recognizer(path, device="cpu", tta=3).read_tta(images)
+    assert len(out) == 4 and all(isinstance(x, str) for x in out)

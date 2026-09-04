@@ -62,7 +62,12 @@ def _rank_page(wcov: float) -> str:
 def evaluate_lines(recognizer: Recognizer, batch_size: int = 12):
     """Line mode: gold crops in, text out."""
     lines = load_lines()
-    predictions = recognizer.read([l.image for l in lines], batch_size=batch_size)
+    images = [l.image for l in lines]
+    predictions = (
+        recognizer.read_tta(images, batch_size=batch_size)
+        if recognizer.tta and recognizer.tta > 1
+        else recognizer.read(images, batch_size=batch_size)
+    )
     report = line_report([l.text for l in lines], predictions)
     records = [
         {"line_id": l.line_id, "page_id": l.page_id, "gold": l.text, "pred": p}
@@ -96,6 +101,8 @@ def main() -> int:
     ap.add_argument("--lm", default=None, help="path to a CharNGramLM for shallow fusion")
     ap.add_argument("--lm-weight", type=float, default=0.4)
     ap.add_argument("--length-bonus", type=float, default=0.6)
+    ap.add_argument("--tta", type=int, default=0,
+                    help="read each line at N horizontal scales, keep the most confident")
     args = ap.parse_args()
 
     lm = None
@@ -109,7 +116,7 @@ def main() -> int:
 
     recognizer = Recognizer(
         args.checkpoint, lm=lm, lm_weight=args.lm_weight,
-        beam_width=args.beam_width, length_bonus=args.length_bonus,
+        beam_width=args.beam_width, length_bonus=args.length_bonus, tta=args.tta,
     )
     print(f"checkpoint: {args.checkpoint}  (trained {recognizer.trained_epochs} epochs)\n")
     payload: dict = {"checkpoint": str(args.checkpoint)}
