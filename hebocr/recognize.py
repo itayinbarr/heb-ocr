@@ -7,14 +7,31 @@ from PIL import Image
 
 from .charset import Charset
 from .data.transforms import preprocess
-from .decode import greedy_confidence, greedy_decode
+from .decode import beam_decode, greedy_confidence, greedy_decode
 from .models.htr_vt import build_model
 
 
 class Recognizer:
     """A trained line recognizer, ready to read cropped lines."""
 
-    def __init__(self, checkpoint: str | Path, device: str | torch.device | None = None):
+    def __init__(
+        self,
+        checkpoint: str | Path,
+        device: str | torch.device | None = None,
+        lm=None,
+        lm_weight: float = 0.4,
+        beam_width: int = 0,
+        length_bonus: float = 0.6,
+    ):
+        """`beam_width` of 0 means greedy decoding; anything else beam-searches.
+
+        An LM is only consulted during beam search -- there is nothing for it to
+        re-rank on a single best path.
+        """
+        self.lm = lm
+        self.lm_weight = lm_weight
+        self.beam_width = beam_width
+        self.length_bonus = length_bonus
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = torch.device(device)
@@ -65,7 +82,16 @@ class Recognizer:
             logprobs = logprobs.float()
 
             lengths = self.model.output_lengths(widths)
-            decoded = greedy_decode(logprobs, lengths, self.charset)
+            if self.beam_width and self.beam_width > 1:
+                decoded = beam_decode(
+                    logprobs, lengths, self.charset,
+                    beam_width=self.beam_width, lm=self.lm,
+                    lm_weight=self.lm_weight, length_bonus=self.length_bonus,
+                )
+            else:
+                decoded = greedy_decode(logprobs, lengths, self.charset)
+            # Confidence always comes from the best path: it is a rejection
+            # signal, and a beam's score is not comparable across line lengths.
             scores = greedy_confidence(logprobs, lengths)
             for j, i in enumerate(chunk):
                 texts[i] = decoded[j]

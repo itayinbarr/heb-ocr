@@ -162,21 +162,6 @@ def estimate_line_pitch(binary: np.ndarray) -> float:
     return float(lo + (peaks[0] if peaks else int(np.argmax(window))))
 
 
-def estimate_stroke_height(binary: np.ndarray) -> float:
-    """Median height of ink components -- a robust proxy for x-height.
-
-    Every downstream threshold is a multiple of this, which is what keeps the
-    segmenter scale-free across pages photographed at different distances.
-    """
-    n, _, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-    if n <= 1:
-        return 10.0
-    heights = stats[1:, cv2.CC_STAT_HEIGHT]
-    areas = stats[1:, cv2.CC_STAT_AREA]
-    keep = heights[(areas >= 6) & (heights >= 3)]
-    return float(np.median(keep)) if len(keep) else 10.0
-
-
 def estimate_skew(binary: np.ndarray, limit: float = 6.0, step: float = 0.5) -> float:
     """Find the rotation that makes horizontal projection most peaked.
 
@@ -218,7 +203,6 @@ def find_lines(binary: np.ndarray, pitch: float) -> list[LineBox]:
     line pitch, so the same code works on a page shot from 20 cm and one shot
     from a metre.
     """
-    stroke_h = pitch
     smear_x = max(8, int(pitch * 0.55))
     # Kept deliberately small: vertical smearing is what welds a line to the one
     # below it. `split_tall` recovers lines that are joined by their descenders.

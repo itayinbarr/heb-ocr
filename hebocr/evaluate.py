@@ -91,9 +91,26 @@ def main() -> int:
     ap.add_argument("--batch-size", type=int, default=12)
     ap.add_argument("--min-confidence", type=float, default=0.0,
                     help="drop page lines the model is unsure of (0 keeps all)")
+    ap.add_argument("--beam-width", type=int, default=0,
+                    help="0 = greedy decoding; >1 enables CTC prefix beam search")
+    ap.add_argument("--lm", default=None, help="path to a CharNGramLM for shallow fusion")
+    ap.add_argument("--lm-weight", type=float, default=0.4)
+    ap.add_argument("--length-bonus", type=float, default=0.6)
     args = ap.parse_args()
 
-    recognizer = Recognizer(args.checkpoint)
+    lm = None
+    if args.lm:
+        from .lm import CharNGramLM
+
+        lm = CharNGramLM.load(args.lm)
+        print(f"language model: {args.lm}  {lm.stats()}")
+        if not args.beam_width:
+            print("  note: an LM only applies during beam search; pass --beam-width")
+
+    recognizer = Recognizer(
+        args.checkpoint, lm=lm, lm_weight=args.lm_weight,
+        beam_width=args.beam_width, length_bonus=args.length_bonus,
+    )
     print(f"checkpoint: {args.checkpoint}  (trained {recognizer.trained_epochs} epochs)\n")
     payload: dict = {"checkpoint": str(args.checkpoint)}
 

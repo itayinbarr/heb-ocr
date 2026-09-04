@@ -87,3 +87,28 @@ def test_page_report_order_independence():
 def test_page_report_counts_blank_pages():
     report = page_report(["a b", "c d"], ["a b", ""])
     assert report.n_blank == 1 and report.n_scored == 1
+
+
+def test_language_model_prefers_seen_sequences():
+    from hebocr.lm import CharNGramLM
+
+    lm = CharNGramLM(order=5).train(["שלום עולם"] * 100)
+    assert lm.logprob("שלו", "ם") > lm.logprob("שלו", "ז")
+
+
+def test_language_model_backs_off_instead_of_returning_negative_infinity():
+    from hebocr.lm import CharNGramLM
+
+    lm = CharNGramLM(order=5).train(["אבג"] * 10)
+    assert lm.logprob("zzz", "ת") > float("-inf")
+
+
+def test_language_model_survives_a_save_load_roundtrip(tmp_path):
+    from hebocr.lm import CharNGramLM
+
+    lm = CharNGramLM(order=4).train(["שלום עולם"] * 50)
+    path = tmp_path / "lm.pkl"
+    lm.save(path)
+    loaded = CharNGramLM.load(path)
+    assert loaded.logprob("של", "ו") == lm.logprob("של", "ו")
+    assert loaded.stats() == lm.stats()
