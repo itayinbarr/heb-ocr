@@ -19,7 +19,10 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 from .charset import BLANK, Charset
-from .data.synth import LineDataset, PixelBudgetSampler, collate, image_widths, load_diffusionpen
+from .data.synth import (
+    LineDataset, MixedLineDataset, PixelBudgetSampler, build_glyph_lines,
+    collate, image_widths, load_diffusionpen,
+)
 from .decode import greedy_decode
 from .metrics import line_report
 from .models.htr_vt import build_model
@@ -34,6 +37,7 @@ class Config:
     max_batch: int = 64
     concat_prob: float = 0.35
     max_concat: int = 3
+    glyph_lines: int = 0
     eval_batch_size: int = 12
     lr: float = 3e-4
     min_lr: float = 1e-6
@@ -157,6 +161,8 @@ def main() -> int:
     ap.add_argument("--max-batch", type=int, default=64)
     ap.add_argument("--concat-prob", type=float, default=0.35,
                     help="probability of joining lines to match benchmark line lengths")
+    ap.add_argument("--glyph-lines", type=int, default=0,
+                    help="how many training lines to compose from real HHD glyphs")
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--accum-steps", type=int, default=1)
     ap.add_argument("--sam", action="store_true", help="use SAM (2x step cost)")
@@ -172,6 +178,7 @@ def main() -> int:
     cfg = Config(
         size=args.size, epochs=args.epochs, lr=args.lr,
         pixel_budget=args.pixel_budget, max_batch=args.max_batch, concat_prob=args.concat_prob,
+        glyph_lines=args.glyph_lines,
         accum_steps=args.accum_steps, use_sam=args.sam, aug_strength=args.aug_strength,
         mask_ratio=args.mask_ratio, num_workers=args.num_workers,
         train_limit=args.train_limit, val_limit=args.val_limit, seed=args.seed,
@@ -194,11 +201,26 @@ def main() -> int:
     val_rows = load_diffusionpen("validation", max_cer=cfg.max_train_cer, limit=cfg.val_limit)
     print(f"train {len(train_rows)}  val {len(val_rows)}", flush=True)
 
-    train_ds = LineDataset(train_rows, charset, train=True, aug_strength=cfg.aug_strength, seed=cfg.seed)
     val_ds = LineDataset(val_rows, charset, train=False)
 
     print("measuring image widths...", flush=True)
     train_widths = image_widths(train_rows, cache=str(out / "train_widths.npy"))
+
+    glyph_items = []
+    if cfg.glyph_lines:
+        # Real handwritten ink. DiffusionPen's generated strokes are the one
+        # thing the model never sees a real version of, and that shows up as the
+        # gap between synthetic validation CER and benchmark CER.
+        print(f"composing {cfg.glyph_lines} lines from real HHD glyphs...", flush=True)
+        glyph_items = build_glyph_lines(train_rows["text"], cfg.glyph_lines, seed=cfg.seed)
+        print(f"  got {len(glyph_items)} glyph lines", flush=True)
+
+    train_ds = MixedLineDataset(
+        train_rows, glyph_items, charset, train=True,
+        aug_strength=cfg.aug_strength, seed=cfg.seed,
+    )
+    train_widths = train_ds.widths(train_widths)
+    print(f"train items: {len(train_ds)} ({len(glyph_items)} glyph-composed)", flush=True)
     print(
         f"widths: mean {train_widths.mean():.0f}  p95 {np.percentile(train_widths, 95):.0f}"
         f"  max {train_widths.max()}",

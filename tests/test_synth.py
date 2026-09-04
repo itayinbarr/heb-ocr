@@ -93,3 +93,50 @@ def test_collate_pads_on_the_right_with_background():
     # Ink is high-valued, so padding must be zero -- background, not ink.
     assert batch.images[0, 0, :, 100:].abs().max() == 0
     assert batch.target_lengths.tolist() == [1, 2]
+
+
+def test_glyph_composition_places_first_character_on_the_right():
+    """Same RTL trap as concat_rtl, and a worse one: mirroring the finished
+    canvas would order the letters correctly but draw each one backwards."""
+    import numpy as np
+
+    from hebocr.data.glyphs import GlyphBank, compose_line
+
+    # One fully inked letter and one blank one, so the ink's position in the
+    # canvas is unambiguously the inked letter's position.
+    inked = np.zeros((40, 30), np.uint8)
+    blank = np.full((40, 30), 255, np.uint8)
+    bank = GlyphBank(glyphs={"א": [inked], "ב": [blank]})
+
+    image, text = compose_line(bank, "אב", np.random.default_rng(0))
+    assert text == "אב"
+    ink = np.where(np.asarray(image).min(axis=0) < 128)[0]
+    # 'א' is written first, so in right-to-left order its ink sits on the right.
+    assert len(ink) > 0 and ink.mean() > image.width * 0.55
+
+
+def test_glyph_composition_labels_only_what_it_drew():
+    """Characters with no real glyph must not appear in the transcription."""
+    import numpy as np
+
+    from hebocr.data.glyphs import GlyphBank, compose_line
+
+    mark = np.full((40, 30), 255, np.uint8)
+    mark[10:30, 5:25] = 0
+    bank = GlyphBank(glyphs={"א": [mark], "ב": [mark]})
+    _, text = compose_line(bank, "אXב9", np.random.default_rng(0))
+    assert text == "אב"
+
+
+def test_mixed_dataset_widths_cover_every_item():
+    import numpy as np
+
+    from hebocr.charset import Charset
+    from hebocr.data.synth import MixedLineDataset
+
+    glyphs = [(np.full((64, 120), 255, np.uint8), "אב"), (np.full((64, 300), 255, np.uint8), "גד")]
+    rows = [{"image": None, "text": "x"}] * 5
+    dataset = MixedLineDataset(rows, glyphs, Charset.default())
+    widths = dataset.widths(np.array([100] * 5))
+    assert len(widths) == len(dataset) == 7
+    assert widths[-2:].tolist() == [120, 300]
