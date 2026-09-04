@@ -73,3 +73,45 @@ def test_augment_compresses_toward_real_line_density():
     augment = Augment(np.random.default_rng(3))
     widths = [augment(_line(600, 64)).shape[2] for _ in range(80)]
     assert min(widths) < 600 * 0.75
+
+
+def test_augment_never_destroys_the_writing():
+    """A blank image paired with a full transcription teaches hallucination.
+
+    Aggressive thinning erases a 2 px stroke outright, and the contrast
+    normalization downstream then amplifies sensor noise into what looks like
+    text. The guard in `Augment` has to make that unreachable.
+    """
+    from hebocr.data.transforms import ink_fraction
+
+    augment = Augment(np.random.default_rng(5))
+    source = _line(600, 90)
+    for _ in range(200):
+        out = augment(source)
+        assert (out > 0.35).mean() > 0.002
+
+
+def test_ink_fraction_reads_zero_on_blank_paper():
+    from hebocr.data.transforms import ink_fraction
+
+    blank = np.full((64, 300), 250, np.uint8)
+    assert ink_fraction(blank) == 0.0
+    assert ink_fraction(np.asarray(_line())) > 0.05
+
+
+def test_vertical_fit_can_shrink_writing_within_its_crop():
+    """Real crops are bounding boxes with slack; synthetic ones are edge to edge."""
+    augment = Augment(np.random.default_rng(2))
+    tall = [augment._vertical_fit(np.asarray(_line(400, 100))) for _ in range(20)]
+    assert all(t.shape == (100, 400) for t in tall)
+    # The writing has been pushed away from at least one edge.
+    assert any(t[:6].min() > 200 or t[-6:].min() > 200 for t in tall)
+
+
+def test_neighbour_bleed_adds_ink_at_an_edge():
+    from hebocr.data.transforms import ink_fraction
+
+    augment = Augment(np.random.default_rng(1))
+    source = np.asarray(_line(400, 100))
+    bled = augment._neighbour_bleed(source)
+    assert ink_fraction(bled) >= ink_fraction(source)
