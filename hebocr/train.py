@@ -1,0 +1,362 @@
+"""Training loop for the CTC line recognizer.
+
+Checkpoint selection uses the synthetic validation split, never the ivrit.ai
+benchmark. The benchmark is scored during training too, but only ever logged --
+if it picked the checkpoint it would stop being a held-out test set and every
+number this repo reports would be inflated.
+"""
+
+import argparse
+import json
+import math
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
+
+from .charset import BLANK, Charset
+from .data.synth import LineDataset, PixelBudgetSampler, collate, image_widths, load_diffusionpen
+from .decode import greedy_decode
+from .metrics import line_report
+from .models.htr_vt import build_model
+from .optim import SAM
+
+
+@dataclass
+class Config:
+    size: str = "base"
+    epochs: int = 40
+    pixel_budget: int = 20000
+    max_batch: int = 64
+    concat_prob: float = 0.35
+    max_concat: int = 3
+    eval_batch_size: int = 12
+    lr: float = 3e-4
+    min_lr: float = 1e-6
+    weight_decay: float = 0.05
+    warmup_steps: int = 1500
+    grad_clip: float = 1.0
+    accum_steps: int = 1
+    use_sam: bool = False
+    sam_rho: float = 0.05
+    mask_ratio: float = 0.4
+    aug_strength: float = 1.0
+    max_train_cer: float = 0.5
+    num_workers: int = 8
+    seed: int = 0
+    train_limit: int | None = None
+    val_limit: int | None = 4000
+    eval_every: int = 1
+    amp: bool = True
+
+
+def _lr_at(step: int, cfg: Config, total_steps: int) -> float:
+    """Linear warmup, then cosine decay to `min_lr`."""
+    if step < cfg.warmup_steps:
+        return cfg.lr * (step + 1) / max(cfg.warmup_steps, 1)
+    progress = (step - cfg.warmup_steps) / max(total_steps - cfg.warmup_steps, 1)
+    progress = min(max(progress, 0.0), 1.0)
+    return cfg.min_lr + 0.5 * (cfg.lr - cfg.min_lr) * (1 + math.cos(math.pi * progress))
+
+
+def ctc_loss(logprobs: torch.Tensor, batch, model) -> torch.Tensor:
+    """CTC over the batch, with impossible samples masked out.
+
+    A line whose transcription is longer than the number of CTC time steps
+    cannot be aligned at all. `zero_infinity` would silently zero those, but
+    they would still dilute the mean, so they are dropped explicitly.
+    """
+    input_lengths = model.output_lengths(batch.widths)
+    keep = input_lengths >= batch.target_lengths
+    if not keep.any():
+        return logprobs.sum() * 0.0
+
+    if not keep.all():
+        # Rebuild the flat target buffer from only the alignable rows.
+        offsets = torch.cat([torch.zeros(1, dtype=torch.long), batch.target_lengths.cumsum(0)])
+        pieces = [
+            batch.targets[offsets[i] : offsets[i + 1]]
+            for i in range(len(batch.target_lengths))
+            if keep[i]
+        ]
+        targets = torch.cat(pieces) if pieces else batch.targets[:0]
+        target_lengths = batch.target_lengths[keep]
+        logprobs = logprobs[keep]
+        input_lengths = input_lengths[keep]
+    else:
+        targets, target_lengths = batch.targets, batch.target_lengths
+
+    return F.ctc_loss(
+        logprobs.permute(1, 0, 2).float(),
+        targets,
+        input_lengths.to(logprobs.device),
+        target_lengths.to(logprobs.device),
+        blank=BLANK,
+        reduction="mean",
+        zero_infinity=True,
+    )
+
+
+@torch.no_grad()
+def evaluate_loader(model, loader, charset: Charset, device, amp: bool, limit: int | None = None):
+    """Greedy-decode a loader and score it. Returns a `LineReport`."""
+    model.eval()
+    refs, hyps = [], []
+    for batch in loader:
+        images = batch.images.to(device, non_blocking=True)
+        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp and device.type == "cuda"):
+            logprobs = model(images)
+        lengths = model.output_lengths(batch.widths)
+        hyps.extend(greedy_decode(logprobs.float(), lengths, charset))
+        refs.extend(batch.texts)
+        if limit is not None and len(refs) >= limit:
+            break
+    model.train()
+    return line_report(refs, hyps)
+
+
+@torch.no_grad()
+def evaluate_benchmark(model, charset: Charset, device, amp: bool, batch_size: int = 16):
+    """Score the held-out ivrit.ai line benchmark. Logged only, never selected on."""
+    from .data.benchmark import load_lines
+    from .data.transforms import preprocess
+
+    model.eval()
+    lines = load_lines()
+    refs = [l.text for l in lines]
+    order = sorted(range(len(lines)), key=lambda i: lines[i].image.size[0] / max(lines[i].image.size[1], 1))
+    hyps: dict[int, str] = {}
+
+    for start in range(0, len(order), batch_size):
+        chunk = order[start : start + batch_size]
+        arrays = [torch.from_numpy(preprocess(lines[i].image)) for i in chunk]
+        widths = torch.tensor([a.shape[-1] for a in arrays], dtype=torch.long)
+        padded = torch.zeros(len(arrays), 1, arrays[0].shape[-2], int(widths.max()))
+        for j, a in enumerate(arrays):
+            padded[j, :, :, : a.shape[-1]] = a
+        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp and device.type == "cuda"):
+            logprobs = model(padded.to(device))
+        for j, text in enumerate(greedy_decode(logprobs.float(), model.output_lengths(widths), charset)):
+            hyps[chunk[j]] = text
+
+    model.train()
+    return line_report(refs, [hyps[i] for i in range(len(refs))])
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--out", default="runs/base", help="checkpoint and log directory")
+    ap.add_argument("--size", default="base", choices=["small", "base", "large"])
+    ap.add_argument("--epochs", type=int, default=40)
+    ap.add_argument("--pixel-budget", type=int, default=20000,
+                    help="max sum of padded pixels per batch (lines x widest line)")
+    ap.add_argument("--max-batch", type=int, default=64)
+    ap.add_argument("--concat-prob", type=float, default=0.35,
+                    help="probability of joining lines to match benchmark line lengths")
+    ap.add_argument("--lr", type=float, default=3e-4)
+    ap.add_argument("--accum-steps", type=int, default=1)
+    ap.add_argument("--sam", action="store_true", help="use SAM (2x step cost)")
+    ap.add_argument("--aug-strength", type=float, default=1.0)
+    ap.add_argument("--mask-ratio", type=float, default=0.4)
+    ap.add_argument("--num-workers", type=int, default=8)
+    ap.add_argument("--train-limit", type=int, default=None)
+    ap.add_argument("--val-limit", type=int, default=4000)
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--resume", default=None)
+    args = ap.parse_args()
+
+    cfg = Config(
+        size=args.size, epochs=args.epochs, lr=args.lr,
+        pixel_budget=args.pixel_budget, max_batch=args.max_batch, concat_prob=args.concat_prob,
+        accum_steps=args.accum_steps, use_sam=args.sam, aug_strength=args.aug_strength,
+        mask_ratio=args.mask_ratio, num_workers=args.num_workers,
+        train_limit=args.train_limit, val_limit=args.val_limit, seed=args.seed,
+    )
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "config.json").write_text(json.dumps(asdict(cfg), indent=2), encoding="utf-8")
+
+    torch.manual_seed(cfg.seed)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"device: {device}  torch {torch.__version__}", flush=True)
+
+    charset = Charset.default()
+    charset.save(out / "charset.json")
+    print(f"charset: {charset.n_classes} classes", flush=True)
+
+    print("loading data...", flush=True)
+    train_rows = load_diffusionpen("train", max_cer=cfg.max_train_cer, limit=cfg.train_limit)
+    val_rows = load_diffusionpen("validation", max_cer=cfg.max_train_cer, limit=cfg.val_limit)
+    print(f"train {len(train_rows)}  val {len(val_rows)}", flush=True)
+
+    train_ds = LineDataset(train_rows, charset, train=True, aug_strength=cfg.aug_strength, seed=cfg.seed)
+    val_ds = LineDataset(val_rows, charset, train=False)
+
+    print("measuring image widths...", flush=True)
+    train_widths = image_widths(train_rows, cache=str(out / "train_widths.npy"))
+    print(
+        f"widths: mean {train_widths.mean():.0f}  p95 {np.percentile(train_widths, 95):.0f}"
+        f"  max {train_widths.max()}",
+        flush=True,
+    )
+    sampler = PixelBudgetSampler(
+        train_widths,
+        budget=cfg.pixel_budget,
+        max_batch=cfg.max_batch,
+        concat_prob=cfg.concat_prob,
+        max_concat=cfg.max_concat,
+        shuffle=True,
+        seed=cfg.seed,
+    )
+
+    train_loader = DataLoader(
+        train_ds, batch_sampler=sampler, collate_fn=collate,
+        num_workers=cfg.num_workers, pin_memory=True, persistent_workers=cfg.num_workers > 0,
+        prefetch_factor=4 if cfg.num_workers > 0 else None,
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=cfg.eval_batch_size, shuffle=False, collate_fn=collate,
+        num_workers=max(2, cfg.num_workers // 2), pin_memory=True,
+    )
+
+    model = build_model(charset.n_classes, cfg.size, mask_ratio=cfg.mask_ratio).to(device)
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"model {cfg.size}: {n_params/1e6:.1f}M params  SAM={cfg.use_sam}", flush=True)
+
+    decay, no_decay = [], []
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        (no_decay if p.ndim <= 1 else decay).append(p)
+    groups = [
+        {"params": decay, "weight_decay": cfg.weight_decay},
+        {"params": no_decay, "weight_decay": 0.0},
+    ]
+    if cfg.use_sam:
+        optimizer = SAM(groups, torch.optim.AdamW, rho=cfg.sam_rho, lr=cfg.lr, betas=(0.9, 0.99))
+    else:
+        optimizer = torch.optim.AdamW(groups, lr=cfg.lr, betas=(0.9, 0.99))
+
+    steps_per_epoch = math.ceil(len(sampler) / cfg.accum_steps)
+    total_steps = steps_per_epoch * cfg.epochs
+    start_epoch, step, best_val = 0, 0, float("inf")
+
+    if args.resume:
+        ck = torch.load(args.resume, map_location=device)
+        model.load_state_dict(ck["model"])
+        optimizer.load_state_dict(ck["optimizer"])
+        start_epoch, step, best_val = ck["epoch"] + 1, ck["step"], ck.get("best_val", float("inf"))
+        print(f"resumed from {args.resume} at epoch {start_epoch}", flush=True)
+
+    log_path = out / "log.jsonl"
+    amp = cfg.amp and device.type == "cuda"
+
+    def set_lr(value: float) -> None:
+        for g in optimizer.param_groups:
+            g["lr"] = value
+
+    def log(record: dict) -> None:
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    print(f"training {cfg.epochs} epochs, {steps_per_epoch} steps/epoch", flush=True)
+    model.train()
+
+    for epoch in range(start_epoch, cfg.epochs):
+        sampler.set_epoch(epoch)
+        epoch_loss, n_batches = 0.0, 0
+        t0 = time.time()
+        optimizer.zero_grad(set_to_none=True)
+
+        for i, batch in enumerate(train_loader):
+            images = batch.images.to(device, non_blocking=True)
+            lr = _lr_at(step, cfg, total_steps)
+            set_lr(lr)
+
+            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp):
+                loss = ctc_loss(model(images), batch, model)
+            (loss / cfg.accum_steps).backward()
+
+            if (i + 1) % cfg.accum_steps == 0:
+                if cfg.use_sam:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
+                    optimizer.first_step(zero_grad=True)
+                    with torch.autocast("cuda", dtype=torch.bfloat16, enabled=amp):
+                        ctc_loss(model(images), batch, model).backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
+                    optimizer.second_step(zero_grad=True)
+                else:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
+                    optimizer.step()
+                    optimizer.zero_grad(set_to_none=True)
+                step += 1
+
+            epoch_loss += float(loss.detach())
+            n_batches += 1
+
+            if n_batches % 200 == 0:
+                rate = n_batches / (time.time() - t0)
+                print(
+                    f"  epoch {epoch} [{n_batches}/{len(sampler)}] "
+                    f"loss {epoch_loss/n_batches:.4f}  lr {lr:.2e}  {rate:.1f} it/s",
+                    flush=True,
+                )
+
+        train_loss = epoch_loss / max(n_batches, 1)
+        record = {
+            "epoch": epoch, "step": step, "train_loss": train_loss,
+            "lr": lr, "seconds": round(time.time() - t0, 1),
+        }
+
+        if (epoch + 1) % cfg.eval_every == 0 or epoch == cfg.epochs - 1:
+            val = evaluate_loader(model, val_loader, charset, device, amp, limit=cfg.val_limit)
+            bench = evaluate_benchmark(model, charset, device, amp, batch_size=cfg.eval_batch_size)
+            record["val"] = val.as_dict()
+            record["benchmark"] = bench.as_dict()
+            print(
+                f"epoch {epoch}  loss {train_loss:.4f}  "
+                f"val {val.summary()}\n"
+                f"           benchmark(held out, not selected on)  {bench.summary()}",
+                flush=True,
+            )
+
+            # Selection metric: micro CER on synthetic validation. Micro rather
+            # than median because median saturates at 0 on easy synthetic lines
+            # long before the model is actually good.
+            score = val.cer_micro
+            if score < best_val:
+                best_val = score
+                torch.save(
+                    {
+                        "model": model.state_dict(), "optimizer": optimizer.state_dict(),
+                        "epoch": epoch, "step": step, "best_val": best_val,
+                        "config": asdict(cfg), "charset": charset.chars,
+                        "val": val.as_dict(), "benchmark": bench.as_dict(),
+                    },
+                    out / "best.pt",
+                )
+                print(f"           new best val CER {best_val:.4f} -> {out/'best.pt'}", flush=True)
+        else:
+            print(f"epoch {epoch}  loss {train_loss:.4f}", flush=True)
+
+        torch.save(
+            {
+                "model": model.state_dict(), "optimizer": optimizer.state_dict(),
+                "epoch": epoch, "step": step, "best_val": best_val,
+                "config": asdict(cfg), "charset": charset.chars,
+            },
+            out / "last.pt",
+        )
+        log(record)
+
+    print(f"done. best synthetic-val CER {best_val:.4f}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

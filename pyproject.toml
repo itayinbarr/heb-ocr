@@ -1,0 +1,26 @@
+[project]
+name = "heb-ocr"
+version = "0.1.0"
+description = "Hebrew handwriting OCR/HTR for the ivrit.ai leaderboard"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.9",
+    "torchvision",
+    "numpy",
+    "pillow",
+    "datasets",
+    "rapidfuzz",
+    "opencv-python-headless",
+    "scipy",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+baselines = ["openai"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["hebocr*"]
