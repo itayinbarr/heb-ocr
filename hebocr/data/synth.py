@@ -460,9 +460,16 @@ def build_glyph_lines(texts, count: int, seed: int = 0, split: str = "train"):
 REAL_INK_SOURCES = {
     # Arabic: right-to-left and cursive, structurally the nearest script to
     # Hebrew among the large public handwriting corpora.
-    "khatt": ("johnlockejrr/KHATT_v1.0_dataset", "train"),
+    "khatt": ("johnlockejrr/KHATT_v1.0_dataset", "train", None),
     # English: left-to-right, but real modern pen on paper at scale.
-    "iam": ("Teklia/IAM-line", "train"),
+    "iam": ("Teklia/IAM-line", "train", None),
+    # Norwegian, 19th and 20th century. By far the largest real-handwriting
+    # corpus available under a permissive licence, and capped rather than used
+    # whole: 222k lines would outnumber the Hebrew data and the point is to
+    # supply ink, not to make the model bilingual.
+    "norhand": ("Teklia/NorHand-v3-line", "train", 30000),
+    # French civil records, another real hand on real paper.
+    "belfort": ("Teklia/Belfort-line", "train", 15000),
 }
 
 
@@ -479,11 +486,14 @@ def load_real_ink(names=("khatt", "iam")):
     for name in names:
         if name not in REAL_INK_SOURCES:
             raise ValueError(f"unknown real-ink source {name!r}")
-        repo, split = REAL_INK_SOURCES[name]
+        repo, split, cap = REAL_INK_SOURCES[name]
         try:
             ds = load_dataset(repo, split=split)
         except Exception as exc:  # noqa: BLE001
             print(f"  skipping {name} ({repo}): {type(exc).__name__}: {exc}", flush=True)
             continue
+        if cap is not None and len(ds) > cap:
+            # Deterministic subsample, so a rerun trains on the same lines.
+            ds = ds.shuffle(seed=0).select(range(cap))
         loaded.append((name, ds))
     return loaded
