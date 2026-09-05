@@ -64,3 +64,44 @@ def test_the_package_imports_from_a_clean_checkout():
         "hebocr.data.benchmark",
     ):
         importlib.import_module(name)
+
+
+def test_exported_checkpoint_loads_and_reads(tmp_path):
+    """A release file must be enough on its own: weights, charset, config."""
+    import subprocess
+    import sys
+
+    import numpy as np
+    import torch
+    from PIL import Image
+
+    from hebocr.charset import Charset
+    from hebocr.models.htr_vt import build_model
+    from hebocr.recognize import Recognizer
+
+    charset = Charset.default()
+    model = build_model(charset.n_classes, "small", mask_ratio=0.0)
+    full = tmp_path / "best.pt"
+    torch.save(
+        {
+            "model": model.state_dict(),
+            "raw_model": model.state_dict(),
+            "optimizer": {"bloat": torch.zeros(1_000_00)},
+            "charset": charset.chars,
+            "config": {"size": "small", "epochs": 18},
+            "epoch": 3,
+            "used_ema": True,
+        },
+        full,
+    )
+
+    released = tmp_path / "release.pt"
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "export_model.py"), str(full), "--out", str(released)],
+        check=True, capture_output=True, cwd=ROOT,
+    )
+    assert released.stat().st_size < full.stat().st_size
+
+    recognizer = Recognizer(released, device="cpu")
+    image = Image.fromarray(np.full((64, 240), 200, np.uint8), mode="L")
+    assert isinstance(recognizer.read([image])[0], str)
