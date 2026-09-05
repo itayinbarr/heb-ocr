@@ -26,7 +26,7 @@ from .data.synth import (
 from .decode import greedy_decode
 from .metrics import line_report
 from .models.htr_vt import build_model
-from .optim import SAM
+from .optim import SAM, ModelEMA
 
 
 @dataclass
@@ -46,6 +46,7 @@ class Config:
     grad_clip: float = 1.0
     accum_steps: int = 1
     use_sam: bool = False
+    ema_decay: float = 0.0
     sam_rho: float = 0.05
     mask_ratio: float = 0.4
     aug_strength: float = 1.0
@@ -166,6 +167,8 @@ def main() -> int:
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--accum-steps", type=int, default=1)
     ap.add_argument("--sam", action="store_true", help="use SAM (2x step cost)")
+    ap.add_argument("--ema", type=float, default=0.0,
+                    help="EMA decay for an averaged copy of the weights (0 disables)")
     ap.add_argument("--aug-strength", type=float, default=1.0)
     ap.add_argument("--mask-ratio", type=float, default=0.4)
     ap.add_argument("--num-workers", type=int, default=8)
@@ -180,7 +183,7 @@ def main() -> int:
         pixel_budget=args.pixel_budget, max_batch=args.max_batch, concat_prob=args.concat_prob,
         glyph_lines=args.glyph_lines,
         accum_steps=args.accum_steps, use_sam=args.sam, aug_strength=args.aug_strength,
-        mask_ratio=args.mask_ratio, num_workers=args.num_workers,
+        mask_ratio=args.mask_ratio, num_workers=args.num_workers, ema_decay=args.ema,
         train_limit=args.train_limit, val_limit=args.val_limit, seed=args.seed,
     )
 
@@ -264,6 +267,10 @@ def main() -> int:
     else:
         optimizer = torch.optim.AdamW(groups, lr=cfg.lr, betas=(0.9, 0.99))
 
+    ema = ModelEMA(model, decay=cfg.ema_decay) if cfg.ema_decay else None
+    if ema is not None:
+        print(f"tracking an EMA of the weights (decay {cfg.ema_decay})", flush=True)
+
     steps_per_epoch = math.ceil(len(sampler) / cfg.accum_steps)
     total_steps = steps_per_epoch * cfg.epochs
     start_epoch, step, best_val = 0, 0, float("inf")
@@ -317,6 +324,8 @@ def main() -> int:
                     optimizer.step()
                     optimizer.zero_grad(set_to_none=True)
                 step += 1
+                if ema is not None:
+                    ema.update(model)
 
             epoch_loss += float(loss.detach())
             n_batches += 1
@@ -336,8 +345,10 @@ def main() -> int:
         }
 
         if (epoch + 1) % cfg.eval_every == 0 or epoch == cfg.epochs - 1:
-            val = evaluate_loader(model, val_loader, charset, device, amp, limit=cfg.val_limit)
-            bench = evaluate_benchmark(model, charset, device, amp, batch_size=cfg.eval_batch_size)
+            # Score the EMA weights when we have them: they are what gets saved.
+            scored = ema.shadow.to(device) if ema is not None else model
+            val = evaluate_loader(scored, val_loader, charset, device, amp, limit=cfg.val_limit)
+            bench = evaluate_benchmark(scored, charset, device, amp, batch_size=cfg.eval_batch_size)
             record["val"] = val.as_dict()
             record["benchmark"] = bench.as_dict()
             print(
@@ -355,7 +366,9 @@ def main() -> int:
                 best_val = score
                 torch.save(
                     {
-                        "model": model.state_dict(), "optimizer": optimizer.state_dict(),
+                        "model": (ema.state_dict() if ema is not None else model.state_dict()),
+                        "raw_model": model.state_dict() if ema is not None else None,
+                        "optimizer": optimizer.state_dict(),
                         "epoch": epoch, "step": step, "best_val": best_val,
                         "config": asdict(cfg), "charset": charset.chars,
                         "val": val.as_dict(), "benchmark": bench.as_dict(),

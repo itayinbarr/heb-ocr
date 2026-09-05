@@ -115,3 +115,30 @@ def test_neighbour_bleed_adds_ink_at_an_edge():
     source = np.asarray(_line(400, 100))
     bled = augment._neighbour_bleed(source)
     assert ink_fraction(bled) >= ink_fraction(source)
+
+
+def test_perspective_warp_is_projective_not_affine():
+    """An affine warp keeps parallel lines parallel; an oblique photo does not."""
+    augment = Augment(np.random.default_rng(3))
+    out = augment._perspective(np.asarray(_line(400, 100)))
+    assert out.shape == (100, 400)
+
+
+def test_bleed_through_stays_faint():
+    """Show-through must read as background to ignore, not as a second line."""
+    from hebocr.data.transforms import ink_fraction
+
+    augment = Augment(np.random.default_rng(4))
+    source = np.asarray(_line(400, 100))
+    for _ in range(30):
+        out = augment._bleed_through(source)
+        # The ghost must not add as much dark area as the real writing has.
+        assert ink_fraction(out) < ink_fraction(source) * 1.8
+
+
+def test_new_effects_preserve_the_augment_contract():
+    augment = Augment(np.random.default_rng(9))
+    for _ in range(60):
+        out = augment(_line(500, 110))
+        assert out.shape[1] == LINE_HEIGHT and np.isfinite(out).all()
+        assert (out > 0.35).mean() > 0.002

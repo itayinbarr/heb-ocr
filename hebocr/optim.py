@@ -67,3 +67,48 @@ class SAM(torch.optim.Optimizer):
     def load_state_dict(self, state_dict) -> None:
         super().load_state_dict(state_dict)
         self.base_optimizer.param_groups = self.param_groups
+
+
+class ModelEMA:
+    """An exponentially-moved average of the weights, evaluated alongside them.
+
+    SGD with a cosine schedule still bounces around the minimum it is
+    descending into; averaging recent weights lands nearer the centre of that
+    basin than any single step does. It costs one extra copy of the model and no
+    extra gradient computation, which makes it close to free here.
+
+    The average is kept in float32 even when training runs in bf16, because the
+    whole point is to accumulate small differences that bf16 would round away.
+    """
+
+    def __init__(self, model, decay: float = 0.9995, warmup_steps: int = 1000):
+        import copy
+
+        self.decay = decay
+        self.warmup_steps = warmup_steps
+        self.steps = 0
+        self.shadow = copy.deepcopy(model).eval().float()
+        for p in self.shadow.parameters():
+            p.requires_grad_(False)
+
+    def _current_decay(self) -> float:
+        """Ramp the decay in, so early averages are not dominated by noise."""
+        if self.steps >= self.warmup_steps:
+            return self.decay
+        return min(self.decay, (1 + self.steps) / (10 + self.steps))
+
+    @torch.no_grad()
+    def update(self, model) -> None:
+        decay = self._current_decay()
+        self.steps += 1
+        shadow_params = dict(self.shadow.named_parameters())
+        for name, param in model.named_parameters():
+            shadow_params[name].mul_(decay).add_(param.detach().float(), alpha=1 - decay)
+        # Buffers (BatchNorm statistics) are copied rather than averaged: they
+        # are already running averages, and averaging them twice lags the model.
+        shadow_buffers = dict(self.shadow.named_buffers())
+        for name, buffer in model.named_buffers():
+            shadow_buffers[name].copy_(buffer.detach().float())
+
+    def state_dict(self) -> dict:
+        return self.shadow.state_dict()

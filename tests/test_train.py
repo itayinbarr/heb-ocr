@@ -103,3 +103,49 @@ def test_greedy_decode_and_scoring_compose():
     report = line_report(batch.texts, hyps)
     assert report.n_total == 2
     assert np.isnan(report.cer_median) or report.cer_median >= 0.0
+
+
+def test_ema_lags_a_moving_target():
+    """The point of an average is to trail the weights, not to copy them."""
+    from hebocr.optim import ModelEMA
+
+    torch.manual_seed(0)
+    model = torch.nn.Linear(4, 4)
+    ema = ModelEMA(model, decay=0.9, warmup_steps=0)
+
+    # Drift the weights steadily, as training does.
+    for _ in range(200):
+        with torch.no_grad():
+            for p in model.parameters():
+                p.add_(0.01)
+        ema.update(model)
+
+    shadow = dict(ema.shadow.named_parameters())["weight"]
+    live = dict(model.named_parameters())["weight"]
+    assert not torch.allclose(shadow, live)
+    assert (shadow < live).all()  # it trails behind the drift
+
+
+def test_ema_converges_on_a_still_target():
+    from hebocr.optim import ModelEMA
+
+    torch.manual_seed(0)
+    model = torch.nn.Linear(4, 4)
+    ema = ModelEMA(model, decay=0.9, warmup_steps=0)
+    with torch.no_grad():
+        for p in model.parameters():
+            p.add_(1.0)
+    for _ in range(300):
+        ema.update(model)
+    assert torch.allclose(
+        dict(ema.shadow.named_parameters())["weight"],
+        dict(model.named_parameters())["weight"],
+        atol=1e-4,
+    )
+
+
+def test_ema_ignores_gradients():
+    from hebocr.optim import ModelEMA
+
+    ema = ModelEMA(torch.nn.Linear(3, 3), decay=0.99)
+    assert all(not p.requires_grad for p in ema.shadow.parameters())
