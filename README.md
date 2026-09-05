@@ -13,7 +13,7 @@ The leaderboard is maintainer-run: there is no submission flow, and the
 maintainers score models with their own harness. Numbers below are from
 `data/{line,page}.csv` on the leaderboard Space, generated **2026-09-04**.
 
-**Line mode** — one line crop in, text out, ranked by *median* CER:
+**Line mode**, one line crop in, text out, ranked by *median* CER:
 
 | model | CER median | lines scored |
 |---|---|---|
@@ -27,7 +27,7 @@ maintainers score models with their own harness. Numbers below are from
 | gpt-5.6-luna | 0.735 | 225 |
 | claude-haiku-4-5 | 0.905 | 225 |
 
-**Full-page mode** — whole page in, transcript out, ranked by order-independent
+**Full-page mode**, whole page in, transcript out, ranked by order-independent
 word coverage:
 
 | model | word coverage | page CER |
@@ -51,12 +51,12 @@ capability, not a metric that has bottomed out.
 
 **Full-page is the softer target.** Best-in-class coverage is 0.462 against a
 human 0.890. Word coverage is explicitly order-independent, so segmentation and
-reading-order mistakes cost nothing there — which makes a classical
+reading-order mistakes cost nothing there, which makes a classical
 segment-then-recognize pipeline a real contender.
 
 **The line-mode leader's 0.119 is flattered by the metric.** Blank outputs are
 dropped before the median is taken, so gemini-flash's headline number is a median
-over 212 of 225 lines, and its *micro* CER on the same run is 2.19 — meaning some
+over 212 of 225 lines, and its *micro* CER on the same run is 2.19, meaning some
 outputs came back many times longer than the truth. `gemini-pro` is unranked
 because 187 of its 225 outputs were blank. Because of this, `hebocr.metrics` also
 reports `cer_median_nodrop`, which charges a blank the full 1.0. Quote both.
@@ -74,10 +74,10 @@ contact with the actual leaderboard:
   Flash-Lite is actually **0.280**, and the 0.119 belongs to gemini-flash.
 - **Pseudo-labeling the ~2,700 untranscribed pages is impossible.** They are not
   published. The benchmark is test-only by design: *"There is no train split, by
-  design — it exists to be held out."*
+  design, it exists to be held out."*
 - **`sivan22/hebrew-handwritten-dataset` is not line-level HHD.** It is
   single-character classification, 28 classes, ~4k glyphs.
-- **The Blackwell/PyTorch setup step is moot** — torch 2.11+cu130 already reports
+- **The Blackwell/PyTorch setup step is moot**, torch 2.11+cu130 already reports
   `sm_120`.
 - **The biggest lever already existed.** `cyttic/diffusionpen-hebrew-handwriting`
   (CC-BY-4.0) is 149,952 synthetic Hebrew handwriting lines in 491 writer styles,
@@ -91,7 +91,7 @@ modelling problem is the domain gap to photographs of real paper. Two measured
 gaps drive the augmentation:
 
 - **Line length.** DiffusionPen tops out at 72 characters; 20% of benchmark lines
-  are longer, up to 111. Fixed by joining lines (`concat_rtl`) — *right-to-left*,
+  are longer, up to 111. Fixed by joining lines (`concat_rtl`), *right-to-left*,
   because Hebrew renders logical-first at the right edge. Reversing this would
   train on backwards text against forward labels and the loss would still fall.
 - **Line density.** At a 64 px height, DiffusionPen renders ~34.5 px per
@@ -104,7 +104,7 @@ noise and JPEG blocking.
 
 ## Design
 
-**Recognizer** (`hebocr/models/htr_vt.py`, ~14M params at `base`) — a CNN
+**Recognizer** (`hebocr/models/htr_vt.py`, ~14M params at `base`), a CNN
 front-end feeding a ViT encoder with a CTC head, following HTR-VT
 (Pattern Recognition, 2025). CTC over an autoregressive decoder because it cannot
 enter a repetition loop, which is a documented failure of the VLMs on this exact
@@ -112,17 +112,17 @@ board. Character-level output means no tokenizer to mishandle RTL or final
 letter forms. The CNN front-end is not optional: HTR-VT's ablation removes it and
 IAM CER goes from 3.3% to 26.6%.
 
-**Segmentation** (`hebocr/page/segment.py`) — deskew, then remove ruled lines,
+**Segmentation** (`hebocr/page/segment.py`), deskew, then remove ruled lines,
 then smear ink into lines and split components that swallowed two. Every
 threshold is a multiple of the page's own measured line pitch, so nothing is
 fitted to the ten test pages. Measured line recall: **96.0%** (216/225).
 
 Order matters and cost two rewrites to get right: rules must be removed *after*
-deskewing, and with a fan of *oriented* kernels — a photographed page's rules sag
+deskewing, and with a fan of *oriented* kernels, a photographed page's rules sag
 and tilt a degree or two, and a flat kernel finds none of them. Leaving them in
 welds every line on the page into one component (recall 30.7% → 48.0% → 96.0%).
 
-**Batching** (`PixelBudgetSampler`) — batches are capped by
+**Batching** (`PixelBudgetSampler`), batches are capped by
 `lines x width-of-widest`, not by a line count. Widths span 150–2400 px, so a
 fixed batch size has no stable memory cost; that is what OOMed the 8 GB card
 first time.
@@ -133,7 +133,7 @@ Trained on synthetic data plus real handwriting in other scripts, evaluated on
 the held-out benchmark. Full tables and every prediction are in
 [`RESULTS.md`](RESULTS.md) and `runs/results.json`.
 
-**Line mode — 2nd of 9 on the leaderboard's own metric:**
+**Line mode, 2nd of 9 on the leaderboard's own metric:**
 
 | model | CER median | lines scored |
 |---|---|---|
@@ -150,7 +150,7 @@ the full 1.0 and we score 0.286 against flash-lite's 0.280 over all 225 lines.
 `RESULTS.md` computes that comparison automatically on every run, because the
 rule that flatters us here is the same one we criticise elsewhere.
 
-**Full-page mode — 5th of 9**: word coverage 0.229, page CER 0.529. Ahead of
+**Full-page mode, 5th of 9**: word coverage 0.229, page CER 0.529. Ahead of
 gemini-flash (0.215) and every Claude and GPT tier below it.
 
 Decoding, all on the same weights: greedy 0.303, beam 0.293, beam + char LM
@@ -178,7 +178,7 @@ Benchmark CER during training, greedy, at matched epochs:
 | v6 (+ real ink, EMA) | **0.475** | **0.361** | **0.325** | **0.311** | **0.303** |
 
 The clearest single result: adding 11,154 lines of real handwriting in *other
-scripts* — Arabic and English, whose labels are meaningless to a Hebrew reader —
+scripts*, Arabic and English, whose labels are meaningless to a Hebrew reader
 improved Hebrew line CER by 11% relative. What transfers is not language but
 ink: stroke texture, pen width, how paper takes a pen.
 
@@ -205,7 +205,7 @@ with your own account first.
 
 - **No in-domain validation set.** Checkpoints are selected on synthetic
   validation CER, never on the benchmark. The benchmark is scored during training
-  but only ever *logged* — selecting on it would make every number here inflated.
+  but only ever *logged*, selecting on it would make every number here inflated.
   The risk this leaves: the checkpoint best on synthetic data need not be best on
   real paper.
 - **The scorer is a reconstruction.** `ivrit-ai/ocr-eval` is private. Scoring is

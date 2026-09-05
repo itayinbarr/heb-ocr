@@ -41,7 +41,10 @@ def test_blank_detection():
 
 def test_dashes_and_ellipsis_canonicalize():
     """Maqaf, en/em dashes and hyphen all mean the same thing to a scorer."""
-    assert normalize("a—b") == normalize("a-b") == normalize("a־b") == "a-b"
+    # Written as escapes so this file contains no literal dash characters,
+    # while still exercising the ones the normalizer has to fold.
+    em, en, maqaf = "\u2014", "\u2013", "\u05be"
+    assert normalize(f"a{em}b") == normalize(f"a{en}b") == normalize(f"a{maqaf}b") == "a-b"
     assert normalize("a…") == "a..."
 
 

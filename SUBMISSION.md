@@ -1,6 +1,6 @@
 # Submitting to the ivrit.ai leaderboard
 
-The leaderboard is **maintainer-run**: its README states "Maintainer-run — no
+The leaderboard is **maintainer-run**: its README states "Maintainer-run, no
 submission flow; regenerated and redeployed when a provider ships a newer
 model." There is no upload endpoint and no automated scoring. So getting listed
 means contacting the maintainers and making it trivial for them to score this
@@ -12,10 +12,10 @@ Via the [Hugging Face org](https://huggingface.co/ivrit-ai) or a GitHub issue on
 [`ivrit-ai/ocr-eval`](https://github.com/ivrit-ai/ocr-eval) (private at the time
 of writing, so the org page or the ivrit.ai site is the reliable route):
 
-- Yanir Marmor — HF `yanirmr`
-- Kinneret Misgav — HF `Kinneret`
-- Yoad Snapir — HF `yoad`
-- Yair Lifshitz — HF `benderrodriguez`
+- Yanir Marmor, HF `yanirmr`
+- Kinneret Misgav, HF `Kinneret`
+- Yoad Snapir, HF `yoad`
+- Yair Lifshitz, HF `benderrodriguez`
 
 ## What to send
 
@@ -37,7 +37,7 @@ every model currently on the board.
 Three things are worth stating up front, because a maintainer will find them
 anyway and it is better they come from us:
 
-1. **`hebocr/metrics.py` is a reconstruction of their metric**, not their code —
+1. **`hebocr/metrics.py` is a reconstruction of their metric**, not their code
    `ocr-eval` is private. They should score with their own harness, and their
    number is the official one. If it disagrees with ours, theirs is right.
 2. **The benchmark was never trained on and never used for checkpoint
@@ -47,7 +47,7 @@ anyway and it is better they come from us:
 3. **The full-page segmenter was necessarily developed against the only real
    pages that exist, which are the test pages.** Its thresholds derive from each
    image's own measured line pitch rather than hand-tuned constants,
-   specifically to limit that exposure — but the exposure is not zero, and the
+   specifically to limit that exposure, but the exposure is not zero, and the
    full-page number should be read with that caveat.
 
 ## Worth offering them

@@ -168,7 +168,7 @@ full 1.0 rather than dropping them from the median as the leaderboard does:
 Best configuration: **{best_page[0]}** at {best_page[1].wcov_micro:.3f} word coverage.
 
 Segmentation recall (fraction of gold lines the segmenter finds, at 50% area
-coverage) is **96.0%** — 216 of 225 — measured by `scripts/eval_segmentation.py`.
+coverage) is **96.0%**, 216 of 225, measured by `scripts/eval_segmentation.py`.
 That is the ceiling any recognizer can reach through this pipeline.
 
 ## The blank-dropping caveat, applied to ourselves
