@@ -1,6 +1,7 @@
 """Integration checks on the training step itself."""
 
 import numpy as np
+import pytest
 import torch
 
 from hebocr.charset import Charset
@@ -149,3 +150,29 @@ def test_ema_ignores_gradients():
 
     ema = ModelEMA(torch.nn.Linear(3, 3), decay=0.99)
     assert all(not p.requires_grad for p in ema.shadow.parameters())
+
+
+def test_learning_rate_multiplier_applies_per_group():
+    """A freshly initialized head needs a higher rate than a pretrained encoder;
+    if the multiplier were ignored, the head would crawl and CTC would sit in
+    its all-blank solution."""
+    from hebocr.train import Config, _lr_at
+
+    model = torch.nn.Module()
+    encoder = torch.nn.Linear(4, 4)
+    head = torch.nn.Linear(4, 4)
+    groups = [
+        {"params": list(encoder.parameters()), "lr_mult": 1.0},
+        {"params": list(head.parameters()), "lr_mult": 10.0},
+    ]
+    optimizer = torch.optim.AdamW(groups, lr=1e-4)
+
+    def set_lr(value):
+        for g in optimizer.param_groups:
+            g["lr"] = value * g.get("lr_mult", 1.0)
+
+    cfg = Config(lr=1e-4, warmup_steps=10)
+    set_lr(_lr_at(50, cfg, 100))
+    lrs = [g["lr"] for g in optimizer.param_groups]
+    assert lrs[1] == pytest.approx(lrs[0] * 10.0)
+    assert lrs[0] > 0

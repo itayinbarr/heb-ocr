@@ -35,6 +35,7 @@ class Config:
     arch: str = "htrvt"
     size: str = "base"
     freeze_layers: int = 0
+    head_lr_mult: float = 1.0
     epochs: int = 40
     pixel_budget: int = 20000
     max_batch: int = 64
@@ -164,6 +165,8 @@ def main() -> int:
                     help="htrvt: our from-scratch CNN+ViT. trocr: pretrained handwriting ViT encoder")
     ap.add_argument("--freeze-layers", type=int, default=0,
                     help="trocr only: freeze the lowest N encoder blocks")
+    ap.add_argument("--head-lr-mult", type=float, default=1.0,
+                    help="learning-rate multiplier for newly initialized layers")
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--pixel-budget", type=int, default=20000,
                     help="max sum of padded pixels per batch (lines x widest line)")
@@ -190,6 +193,7 @@ def main() -> int:
 
     cfg = Config(
         arch=args.arch, size=args.size, freeze_layers=args.freeze_layers,
+        head_lr_mult=args.head_lr_mult,
         epochs=args.epochs, lr=args.lr,
         pixel_budget=args.pixel_budget, max_batch=args.max_batch, concat_prob=args.concat_prob,
         glyph_lines=args.glyph_lines,
@@ -298,15 +302,34 @@ def main() -> int:
         flush=True,
     )
 
-    decay, no_decay = [], []
-    for name, p in model.named_parameters():
-        if not p.requires_grad:
+    # Split by weight decay, and separately by whether a parameter is
+    # pretrained. A freshly initialized head has to move much further than a
+    # pretrained encoder does, and holding both at one learning rate leaves the
+    # head crawling: with a random CTC head at the encoder's rate the model sits
+    # in CTC's all-blank solution for epochs before it escapes.
+    NEW_MODULE_PREFIXES = ("proj", "norm", "head")
+
+    buckets: dict[tuple[bool, bool], list] = {}
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
             continue
-        (no_decay if p.ndim <= 1 else decay).append(p)
-    groups = [
-        {"params": decay, "weight_decay": cfg.weight_decay},
-        {"params": no_decay, "weight_decay": 0.0},
-    ]
+        is_new = name.startswith(NEW_MODULE_PREFIXES)
+        buckets.setdefault((is_new, param.ndim <= 1), []).append(param)
+
+    groups = []
+    for (is_new, is_bias), params in buckets.items():
+        groups.append({
+            "params": params,
+            "weight_decay": 0.0 if is_bias else cfg.weight_decay,
+            "lr_mult": cfg.head_lr_mult if is_new else 1.0,
+        })
+    n_new = sum(len(v) for (is_new, _), v in buckets.items() if is_new)
+    if cfg.head_lr_mult != 1.0:
+        print(
+            f"learning rate: {n_new} newly initialized tensors at "
+            f"{cfg.head_lr_mult}x the encoder rate",
+            flush=True,
+        )
     if cfg.use_sam:
         optimizer = SAM(groups, torch.optim.AdamW, rho=cfg.sam_rho, lr=cfg.lr, betas=(0.9, 0.99))
     else:
@@ -332,7 +355,7 @@ def main() -> int:
 
     def set_lr(value: float) -> None:
         for g in optimizer.param_groups:
-            g["lr"] = value
+            g["lr"] = value * g.get("lr_mult", 1.0)
 
     def log(record: dict) -> None:
         with log_path.open("a", encoding="utf-8") as fh:
