@@ -171,3 +171,18 @@ def test_descenders_are_drawn_below_the_baseline():
         return int(rows.max()) if len(rows) else 0
 
     assert lowest_ink(desc_img) > lowest_ink(plain_img)
+
+
+def test_sampler_never_concatenates_past_the_rtl_boundary():
+    """Concatenation places the next line to the LEFT, which is only correct for
+    right-to-left scripts. Left-to-right real-ink lines must stay unjoined."""
+    widths = np.full(400, 300, dtype=np.int64)
+    boundary = 250
+    sampler = PixelBudgetSampler(
+        widths, budget=20000, concat_prob=1.0, max_concat=3,
+        seed=0, concat_max_index=boundary,
+    )
+    for batch in sampler:
+        for group in batch:
+            if len(group) > 1:
+                assert all(i < boundary for i in group)

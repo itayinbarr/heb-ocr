@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader
 from .charset import BLANK, Charset
 from .data.synth import (
     LineDataset, MixedLineDataset, PixelBudgetSampler, build_glyph_lines,
-    collate, image_widths, load_diffusionpen,
+    collate, image_widths, load_diffusionpen, load_real_ink,
 )
 from .decode import greedy_decode
 from .metrics import line_report
@@ -38,6 +38,7 @@ class Config:
     concat_prob: float = 0.35
     max_concat: int = 3
     glyph_lines: int = 0
+    real_ink: tuple = ()
     eval_batch_size: int = 12
     lr: float = 3e-4
     min_lr: float = 1e-6
@@ -164,6 +165,8 @@ def main() -> int:
                     help="probability of joining lines to match benchmark line lengths")
     ap.add_argument("--glyph-lines", type=int, default=0,
                     help="how many training lines to compose from real HHD glyphs")
+    ap.add_argument("--real-ink", default="",
+                    help="comma-separated real-handwriting sources to mix in (khatt,iam)")
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--accum-steps", type=int, default=1)
     ap.add_argument("--sam", action="store_true", help="use SAM (2x step cost)")
@@ -182,6 +185,7 @@ def main() -> int:
         size=args.size, epochs=args.epochs, lr=args.lr,
         pixel_budget=args.pixel_budget, max_batch=args.max_batch, concat_prob=args.concat_prob,
         glyph_lines=args.glyph_lines,
+        real_ink=tuple(x for x in args.real_ink.split(",") if x),
         accum_steps=args.accum_steps, use_sam=args.sam, aug_strength=args.aug_strength,
         mask_ratio=args.mask_ratio, num_workers=args.num_workers, ema_decay=args.ema,
         train_limit=args.train_limit, val_limit=args.val_limit, seed=args.seed,
@@ -196,8 +200,6 @@ def main() -> int:
     print(f"device: {device}  torch {torch.__version__}", flush=True)
 
     charset = Charset.default()
-    charset.save(out / "charset.json")
-    print(f"charset: {charset.n_classes} classes", flush=True)
 
     print("loading data...", flush=True)
     train_rows = load_diffusionpen("train", max_cer=cfg.max_train_cer, limit=cfg.train_limit)
@@ -208,6 +210,24 @@ def main() -> int:
 
     print("measuring image widths...", flush=True)
     train_widths = image_widths(train_rows, cache=str(out / "train_widths.npy"))
+
+    extra_sources, extra_widths = [], []
+    if cfg.real_ink:
+        print(f"loading real handwriting: {', '.join(cfg.real_ink)}", flush=True)
+        for name, ds in load_real_ink(cfg.real_ink):
+            extra_sources.append(ds)
+            extra_widths.append(image_widths(ds, cache=str(out / f"widths_{name}.npy")))
+            print(f"  {name}: {len(ds)} real lines", flush=True)
+        if extra_sources:
+            # These lines carry their own alphabets. Hebrew keeps its class
+            # indices; the foreign letters are appended after them.
+            before = charset.n_classes
+            for ds in extra_sources:
+                charset = charset.extend(ds["text"], min_count=20)
+            print(f"  charset {before} -> {charset.n_classes} classes", flush=True)
+
+    charset.save(out / "charset.json")
+    print(f"charset: {charset.n_classes} classes", flush=True)
 
     glyph_items = []
     if cfg.glyph_lines:
@@ -220,10 +240,14 @@ def main() -> int:
 
     train_ds = MixedLineDataset(
         train_rows, glyph_items, charset, train=True,
-        aug_strength=cfg.aug_strength, seed=cfg.seed,
+        aug_strength=cfg.aug_strength, seed=cfg.seed, extra_sources=extra_sources,
     )
-    train_widths = train_ds.widths(train_widths)
-    print(f"train items: {len(train_ds)} ({len(glyph_items)} glyph-composed)", flush=True)
+    train_widths = train_ds.widths(train_widths, extra_widths)
+    print(
+        f"train items: {len(train_ds)} "
+        f"({len(glyph_items)} glyph-composed, {sum(len(s) for s in extra_sources)} real-ink)",
+        flush=True,
+    )
     print(
         f"widths: mean {train_widths.mean():.0f}  p95 {np.percentile(train_widths, 95):.0f}"
         f"  max {train_widths.max()}",
@@ -237,6 +261,9 @@ def main() -> int:
         max_concat=cfg.max_concat,
         shuffle=True,
         seed=cfg.seed,
+        # Hebrew sources occupy the leading indices; the real-ink lines that
+        # follow are left out of concatenation because it assumes RTL.
+        concat_max_index=len(train_rows) + len(glyph_items),
     )
 
     train_loader = DataLoader(

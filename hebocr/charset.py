@@ -85,6 +85,20 @@ class Charset:
         seen = dict.fromkeys(HEBREW_LETTERS + DIGITS + BASE_PUNCT + LATIN)
         return cls(chars=[""] + list(seen))
 
+    def extend(self, texts, min_count: int = 20) -> "Charset":
+        """Add characters seen in `texts`, keeping the existing order stable.
+
+        Used when real handwriting in another script is mixed into training:
+        those lines need their own alphabet, and the Hebrew classes must keep
+        their indices so a checkpoint stays comparable across runs.
+        """
+        counts = Counter()
+        for t in texts:
+            counts.update(normalize(t))
+        known = set(self.chars)
+        new = sorted(c for c, n in counts.items() if n >= min_count and c not in known)
+        return Charset(chars=list(self.chars) + new)
+
     @classmethod
     def from_texts(cls, texts, min_count: int = 1) -> "Charset":
         """Build from a corpus, keeping characters seen at least `min_count`.
