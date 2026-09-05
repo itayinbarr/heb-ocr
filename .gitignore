@@ -1,7 +1,9 @@
 .venv/
 __pycache__/
 *.pyc
-data/
+# Only the top-level data directory: 'data/' also matched hebocr/data/,
+# which silently kept the entire data package out of the repository.
+/data/
 runs/
 *.pt
 *.ckpt
