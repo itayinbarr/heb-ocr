@@ -372,10 +372,28 @@ def main() -> int:
         }
 
         if (epoch + 1) % cfg.eval_every == 0 or epoch == cfg.epochs - 1:
-            # Score the EMA weights when we have them: they are what gets saved.
-            scored = ema.shadow.to(device) if ema is not None else model
-            val = evaluate_loader(scored, val_loader, charset, device, amp, limit=cfg.val_limit)
-            bench = evaluate_benchmark(scored, charset, device, amp, batch_size=cfg.eval_batch_size)
+            # Score the raw weights and the EMA separately and keep whichever is
+            # better. An EMA starts from the random initialization and needs
+            # roughly 1/(1-decay) steps to shed it, so early on it is far worse
+            # than the live weights -- scoring only the EMA hides the model's
+            # real trajectory for the first few epochs.
+            val = evaluate_loader(model, val_loader, charset, device, amp, limit=cfg.val_limit)
+            bench = evaluate_benchmark(model, charset, device, amp, batch_size=cfg.eval_batch_size)
+            use_ema = False
+
+            if ema is not None:
+                shadow = ema.shadow.to(device)
+                ema_val = evaluate_loader(shadow, val_loader, charset, device, amp, limit=cfg.val_limit)
+                ema_bench = evaluate_benchmark(shadow, charset, device, amp, batch_size=cfg.eval_batch_size)
+                record["ema_val"] = ema_val.as_dict()
+                record["ema_benchmark"] = ema_bench.as_dict()
+                print(
+                    f"           ema        val {ema_val.summary()}\n"
+                    f"           ema        bench {ema_bench.summary()}",
+                    flush=True,
+                )
+                if ema_val.cer_micro < val.cer_micro:
+                    val, bench, use_ema = ema_val, ema_bench, True
             record["val"] = val.as_dict()
             record["benchmark"] = bench.as_dict()
             print(
@@ -393,8 +411,9 @@ def main() -> int:
                 best_val = score
                 torch.save(
                     {
-                        "model": (ema.state_dict() if ema is not None else model.state_dict()),
-                        "raw_model": model.state_dict() if ema is not None else None,
+                        "model": (ema.state_dict() if use_ema else model.state_dict()),
+                        "used_ema": use_ema,
+                        "raw_model": model.state_dict() if use_ema else None,
                         "optimizer": optimizer.state_dict(),
                         "epoch": epoch, "step": step, "best_val": best_val,
                         "config": asdict(cfg), "charset": charset.chars,
