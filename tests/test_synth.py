@@ -186,3 +186,18 @@ def test_sampler_never_concatenates_past_the_rtl_boundary():
         for group in batch:
             if len(group) > 1:
                 assert all(i < boundary for i in group)
+
+
+def test_changing_strength_rebuilds_the_augmenter():
+    """An augmentation ramp is useless if workers keep the original strength."""
+    from hebocr.charset import Charset
+    from hebocr.data.synth import MixedLineDataset
+
+    dataset = MixedLineDataset([], [], Charset.default(), train=True, aug_strength=0.3)
+    first = dataset._aug_for_worker()
+    assert first.strength == 0.3
+    assert dataset._aug_for_worker() is first      # cached while unchanged
+
+    dataset.aug_strength = 1.0
+    rebuilt = dataset._aug_for_worker()
+    assert rebuilt is not first and rebuilt.strength == 1.0

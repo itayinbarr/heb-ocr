@@ -36,6 +36,7 @@ class Config:
     size: str = "base"
     freeze_layers: int = 0
     head_lr_mult: float = 1.0
+    aug_warmup_epochs: int = 0
     epochs: int = 40
     pixel_budget: int = 20000
     max_batch: int = 64
@@ -167,6 +168,8 @@ def main() -> int:
                     help="trocr only: freeze the lowest N encoder blocks")
     ap.add_argument("--head-lr-mult", type=float, default=1.0,
                     help="learning-rate multiplier for newly initialized layers")
+    ap.add_argument("--aug-warmup-epochs", type=int, default=0,
+                    help="ramp augmentation strength from a third to full over N epochs")
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--pixel-budget", type=int, default=20000,
                     help="max sum of padded pixels per batch (lines x widest line)")
@@ -193,7 +196,7 @@ def main() -> int:
 
     cfg = Config(
         arch=args.arch, size=args.size, freeze_layers=args.freeze_layers,
-        head_lr_mult=args.head_lr_mult,
+        head_lr_mult=args.head_lr_mult, aug_warmup_epochs=args.aug_warmup_epochs,
         epochs=args.epochs, lr=args.lr,
         pixel_budget=args.pixel_budget, max_batch=args.max_batch, concat_prob=args.concat_prob,
         glyph_lines=args.glyph_lines,
@@ -252,7 +255,8 @@ def main() -> int:
 
     train_ds = MixedLineDataset(
         train_rows, glyph_items, charset, train=True,
-        aug_strength=cfg.aug_strength, seed=cfg.seed, extra_sources=extra_sources,
+        aug_strength=cfg.aug_strength * (0.33 if cfg.aug_warmup_epochs else 1.0),
+        seed=cfg.seed, extra_sources=extra_sources,
     )
     train_widths = train_ds.widths(train_widths, extra_widths)
     print(
@@ -280,7 +284,10 @@ def main() -> int:
 
     train_loader = DataLoader(
         train_ds, batch_sampler=sampler, collate_fn=collate,
-        num_workers=cfg.num_workers, pin_memory=True, persistent_workers=cfg.num_workers > 0,
+        num_workers=cfg.num_workers, pin_memory=True,
+        # Not persistent: workers are re-forked each epoch so they pick up a
+        # changed augmentation strength.
+        persistent_workers=False,
         prefetch_factor=4 if cfg.num_workers > 0 else None,
     )
     val_loader = DataLoader(
@@ -366,6 +373,17 @@ def main() -> int:
 
     for epoch in range(start_epoch, cfg.epochs):
         sampler.set_epoch(epoch)
+
+        if cfg.aug_warmup_epochs:
+            # Ease the model into the distortions rather than opening at full
+            # strength. Verified separately: this architecture reaches CER 0.000
+            # overfitting clean crops, so early failure was the augmentation,
+            # not the model.
+            ramp = min(1.0, (epoch + 1) / (cfg.aug_warmup_epochs + 1))
+            strength = cfg.aug_strength * (0.33 + 0.67 * ramp)
+            if abs(strength - train_ds.aug_strength) > 1e-6:
+                train_ds.aug_strength = strength
+                print(f"  augmentation strength {strength:.2f}", flush=True)
         epoch_loss, n_batches = 0.0, 0
         t0 = time.time()
         optimizer.zero_grad(set_to_none=True)

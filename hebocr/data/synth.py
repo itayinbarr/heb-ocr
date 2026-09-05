@@ -390,7 +390,11 @@ class MixedLineDataset(Dataset):
         return np.concatenate(parts)
 
     def _aug_for_worker(self) -> Augment:
-        if self._augment is None:
+        # Rebuilt when the strength changes, so an augmentation ramp actually
+        # reaches the workers. A pretrained encoder meets inputs far outside its
+        # pretraining distribution if full-strength augmentation starts on step
+        # one, and CTC answers that by collapsing to all-blank output.
+        if self._augment is None or self._augment.strength != self.aug_strength:
             info = torch.utils.data.get_worker_info()
             wid = info.id if info is not None else 0
             self._augment = Augment(
