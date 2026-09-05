@@ -106,6 +106,35 @@ def main() -> int:
     best_line = min(line_rows, key=lambda r: r[1].cer_median)
     best_page = max(page_rows, key=lambda r: r[1].wcov_micro)
 
+    # The published model our best configuration is closest to, for the
+    # blanks-dropped versus no-drop comparison.
+    report = best_line[1]
+    rival_name, rival_cer, rival_lines = min(
+        PUBLISHED_LINE, key=lambda e: abs(e[1] - report.cer_median)
+    )
+    if report.cer_median < rival_cer and report.cer_median_nodrop > rival_cer:
+        verdict = (
+            f"So this model wins on the board's own metric and loses on the stricter "
+            f"one. {rival_name} returned text for all {rival_lines} lines, so its "
+            f"no-drop median is also {rival_cer:.3f}; ours is inflated by "
+            f"{report.n_blank} dropped line(s). Treat the two as a tie until the "
+            f"blanks are recovered."
+        )
+    elif report.cer_median_nodrop < rival_cer:
+        verdict = (
+            f"This model is ahead of {rival_name} on both readings, so the ranking "
+            f"does not depend on the blank-dropping rule."
+        )
+    else:
+        verdict = (
+            f"This model is behind {rival_name} on both readings; the blank-dropping "
+            f"rule is not what separates them."
+        )
+
+    best_drop = report.cer_median
+    best_nodrop = report.cer_median_nodrop
+    best_scored = report.n_scored
+
     doc = f"""# Results
 
 Checkpoint: `{args.checkpoint}`. Benchmark: `ivrit-ai/hebrew-handwriting-ocr-benchmark`
@@ -141,6 +170,19 @@ Best configuration: **{best_page[0]}** at {best_page[1].wcov_micro:.3f} word cov
 Segmentation recall (fraction of gold lines the segmenter finds, at 50% area
 coverage) is **96.0%** — 216 of 225 — measured by `scripts/eval_segmentation.py`.
 That is the ceiling any recognizer can reach through this pipeline.
+
+## The blank-dropping caveat, applied to ourselves
+
+The leaderboard drops blank outputs before taking the median. When that rule
+flatters someone else it is worth pointing out; when it flatters us it is worth
+pointing out twice. Both readings of the best configuration:
+
+| metric | this model | nearest published model |
+|---|---|---|
+| leaderboard rule (blanks dropped) | {best_drop:.3f} over {best_scored} lines | {rival_name} {rival_cer:.3f} over {rival_lines} |
+| no-drop (a blank scores 1.0) | {best_nodrop:.3f} | {rival_cer:.3f} |
+
+{verdict}
 
 ## Reading these numbers
 

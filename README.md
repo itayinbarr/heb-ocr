@@ -129,39 +129,58 @@ first time.
 
 ## Results
 
-Trained on synthetic data only, evaluated on the held-out benchmark. Full tables
-and every prediction are in [`RESULTS.md`](RESULTS.md) and `runs/results.json`.
+Trained on synthetic data plus real handwriting in other scripts, evaluated on
+the held-out benchmark. Full tables and every prediction are in
+[`RESULTS.md`](RESULTS.md) and `runs/results.json`.
 
-**Line mode — 3rd of 9**, behind only two Gemini tiers:
+**Line mode — 2nd of 9 on the leaderboard's own metric:**
 
-| model | CER median |
-|---|---|
-| *human, 2nd read* | *0.000* |
-| gemini-flash | 0.119 |
-| gemini-flash-lite | 0.280 |
-| **this model** (beam + char LM) | **0.306** |
-| gpt-5.6-sol | 0.440 |
-| claude-opus-5 | 0.692 |
+| model | CER median | lines scored |
+|---|---|---|
+| *human, 2nd read* | *0.000* | *225* |
+| gemini-flash | 0.119 | 212 |
+| **this model** (beam + char LM) | **0.273** | 217 |
+| gemini-flash-lite | 0.280 | 225 |
+| gpt-5.6-sol | 0.440 | 225 |
+| claude-opus-5 | 0.692 | 225 |
 
-**Full-page mode — 5th of 9**: word coverage 0.235, page CER 0.514.
+**Read honestly, that is a tie rather than a win.** The board drops blank
+outputs before taking the median, and our 0.273 drops 8 of them. Charge a blank
+the full 1.0 and we score 0.286 against flash-lite's 0.280 over all 225 lines.
+`RESULTS.md` computes that comparison automatically on every run, because the
+rule that flatters us here is the same one we criticise elsewhere.
 
-Decoding, all on the same weights: greedy 0.327 → beam 0.312 → beam + char LM
-0.306. The LM's effect on *word coverage* is much larger than on CER (0.191 →
-0.290), which is what you would expect from a model that fixes nearly-right
-strings into exactly-right words.
+**Full-page mode — 5th of 9**: word coverage 0.229, page CER 0.529. Ahead of
+gemini-flash (0.215) and every Claude and GPT tier below it.
 
-The model never returns a blank, so its no-drop median equals its median.
-That is not true of the current leader.
+Decoding, all on the same weights: greedy 0.303, beam 0.293, beam + char LM
+0.273. The LM's effect on word coverage is far larger than on CER (0.210 →
+0.316), which is what a model that turns nearly-right strings into exactly-right
+words should do.
 
-What moved the number, in order: fixing the augmentation's stroke weight,
-vertical fill and neighbour bleed; mixing in lines built from real handwritten
-glyphs; and giving those glyphs correct per-letter proportions. Model and
-optimizer changes did nothing by comparison. The training curve across runs:
+### What actually moved the number
+
+Every large gain came from making the ink more realistic. Architecture and
+optimizer changes contributed nothing by comparison.
+
+| run | change | line CER (beam + LM) |
+|---|---|---|
+| v2 | DiffusionPen only, strong augmentation | - |
+| v4 | + lines composed from real handwritten glyphs | 0.306 |
+| v6 | + 11k real Arabic/English handwriting lines, EMA | **0.273** |
+
+Benchmark CER during training, greedy, at matched epochs:
 
 | epoch | 2 | 5 | 8 | 12 | 17 |
 |---|---|---|---|---|---|
-| DiffusionPen only | 0.595 | 0.475 | - | - | - |
-| + real glyph lines | 0.562 | 0.414 | 0.382 | 0.360 | **0.327** |
+| v2 (DiffusionPen only) | 0.595 | 0.475 | - | - | - |
+| v4 (+ real glyphs) | 0.562 | 0.414 | 0.382 | 0.360 | 0.327 |
+| v6 (+ real ink, EMA) | **0.475** | **0.361** | **0.325** | **0.311** | **0.303** |
+
+The clearest single result: adding 11,154 lines of real handwriting in *other
+scripts* — Arabic and English, whose labels are meaningless to a Hebrew reader —
+improved Hebrew line CER by 11% relative. What transfers is not language but
+ink: stroke texture, pen width, how paper takes a pen.
 
 ## Usage
 
