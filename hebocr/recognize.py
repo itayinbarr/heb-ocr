@@ -11,6 +11,24 @@ from .decode import beam_decode, greedy_confidence, greedy_decode
 from .models.htr_vt import build_model
 
 
+def _bare_vit(config: dict):
+    """A randomly initialized ViT of the right shape, to be filled from the
+    checkpoint. Avoids downloading pretrained weights only to discard them."""
+    from transformers import ViTConfig, ViTModel
+
+    return ViTModel(
+        ViTConfig(
+            image_size=config.get("vit_image_size", 384),
+            patch_size=config.get("vit_patch_size", 16),
+            hidden_size=config.get("vit_hidden", 768),
+            num_hidden_layers=config.get("vit_layers", 12),
+            num_attention_heads=config.get("vit_heads", 12),
+            intermediate_size=config.get("vit_mlp", 3072),
+        ),
+        add_pooling_layer=False,
+    )
+
+
 class Recognizer:
     """A trained line recognizer, ready to read cropped lines."""
 
@@ -41,11 +59,20 @@ class Recognizer:
         state = torch.load(checkpoint, map_location="cpu", weights_only=False)
         self.charset = Charset(chars=state["charset"])
         config = state.get("config", {})
-        self.model = build_model(
-            self.charset.n_classes,
-            config.get("size", "base"),
-            mask_ratio=0.0,  # a regularizer; it must not perturb inference
-        )
+        if config.get("arch") == "trocr":
+            from .models.trocr_ctc import build_trocr_ctc
+
+            # The pretrained weights are about to be overwritten by the
+            # checkpoint, so skip the download and build it from config.
+            self.model = build_trocr_ctc(
+                self.charset.n_classes, grad_checkpointing=False, encoder=_bare_vit(config)
+            )
+        else:
+            self.model = build_model(
+                self.charset.n_classes,
+                config.get("size", "base"),
+                mask_ratio=0.0,  # a regularizer; it must not perturb inference
+            )
         self.model.load_state_dict(state["model"])
         self.model.to(self.device).eval()
         self.trained_epochs = state.get("epoch", -1) + 1

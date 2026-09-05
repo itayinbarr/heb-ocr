@@ -26,12 +26,15 @@ from .data.synth import (
 from .decode import greedy_decode
 from .metrics import line_report
 from .models.htr_vt import build_model
+from .models.trocr_ctc import build_trocr_ctc
 from .optim import SAM, ModelEMA
 
 
 @dataclass
 class Config:
+    arch: str = "htrvt"
     size: str = "base"
+    freeze_layers: int = 0
     epochs: int = 40
     pixel_budget: int = 20000
     max_batch: int = 64
@@ -157,6 +160,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default="runs/base", help="checkpoint and log directory")
     ap.add_argument("--size", default="base", choices=["small", "base", "large"])
+    ap.add_argument("--arch", default="htrvt", choices=["htrvt", "trocr"],
+                    help="htrvt: our from-scratch CNN+ViT. trocr: pretrained handwriting ViT encoder")
+    ap.add_argument("--freeze-layers", type=int, default=0,
+                    help="trocr only: freeze the lowest N encoder blocks")
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--pixel-budget", type=int, default=20000,
                     help="max sum of padded pixels per batch (lines x widest line)")
@@ -182,7 +189,8 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = Config(
-        size=args.size, epochs=args.epochs, lr=args.lr,
+        arch=args.arch, size=args.size, freeze_layers=args.freeze_layers,
+        epochs=args.epochs, lr=args.lr,
         pixel_budget=args.pixel_budget, max_batch=args.max_batch, concat_prob=args.concat_prob,
         glyph_lines=args.glyph_lines,
         real_ink=tuple(x for x in args.real_ink.split(",") if x),
@@ -276,9 +284,19 @@ def main() -> int:
         num_workers=max(2, cfg.num_workers // 2), pin_memory=True,
     )
 
-    model = build_model(charset.n_classes, cfg.size, mask_ratio=cfg.mask_ratio).to(device)
+    if cfg.arch == "trocr":
+        model = build_trocr_ctc(charset.n_classes, freeze_layers=cfg.freeze_layers).to(device)
+        label = f"trocr-ctc (frozen {cfg.freeze_layers} layers)"
+    else:
+        model = build_model(charset.n_classes, cfg.size, mask_ratio=cfg.mask_ratio).to(device)
+        label = f"htrvt {cfg.size}"
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"model {cfg.size}: {n_params/1e6:.1f}M params  SAM={cfg.use_sam}", flush=True)
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(
+        f"model {label}: {n_params/1e6:.1f}M params "
+        f"({trainable/1e6:.1f}M trainable)  SAM={cfg.use_sam}",
+        flush=True,
+    )
 
     decay, no_decay = [], []
     for name, p in model.named_parameters():
