@@ -129,8 +129,39 @@ first time.
 
 ## Results
 
-Training in progress; this section is filled in by
-`python -m hebocr.evaluate runs/base/best.pt`. See `RESULTS.md`.
+Trained on synthetic data only, evaluated on the held-out benchmark. Full tables
+and every prediction are in [`RESULTS.md`](RESULTS.md) and `runs/results.json`.
+
+**Line mode — 3rd of 9**, behind only two Gemini tiers:
+
+| model | CER median |
+|---|---|
+| *human, 2nd read* | *0.000* |
+| gemini-flash | 0.119 |
+| gemini-flash-lite | 0.280 |
+| **this model** (beam + char LM) | **0.306** |
+| gpt-5.6-sol | 0.440 |
+| claude-opus-5 | 0.692 |
+
+**Full-page mode — 5th of 9**: word coverage 0.235, page CER 0.514.
+
+Decoding, all on the same weights: greedy 0.327 → beam 0.312 → beam + char LM
+0.306. The LM's effect on *word coverage* is much larger than on CER (0.191 →
+0.290), which is what you would expect from a model that fixes nearly-right
+strings into exactly-right words.
+
+The model never returns a blank, so its no-drop median equals its median.
+That is not true of the current leader.
+
+What moved the number, in order: fixing the augmentation's stroke weight,
+vertical fill and neighbour bleed; mixing in lines built from real handwritten
+glyphs; and giving those glyphs correct per-letter proportions. Model and
+optimizer changes did nothing by comparison. The training curve across runs:
+
+| epoch | 2 | 5 | 8 | 12 | 17 |
+|---|---|---|---|---|---|
+| DiffusionPen only | 0.595 | 0.475 | - | - | - |
+| + real glyph lines | 0.562 | 0.414 | 0.382 | 0.360 | **0.327** |
 
 ## Usage
 
