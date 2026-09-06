@@ -13,10 +13,10 @@ selection used synthetic validation CER only.
 |---|---|---|
 | *human, 2nd read* | 0.000 | *225* |
 | gemini-flash | 0.119 | 212 |
-| **this model (beam 12 + char LM)** | 0.273 | 217 |
+| **this model (beam 12 + char LM)** | 0.234 | 214 |
+| **this model (greedy)** | 0.250 | 217 |
+| **this model (beam 12)** | 0.250 | 218 |
 | gemini-flash-lite | 0.280 | 225 |
-| **this model (beam 12)** | 0.293 | 225 |
-| **this model (greedy)** | 0.303 | 225 |
 | gpt-5.6-sol | 0.440 | 225 |
 | gpt-5.6-terra | 0.585 | 225 |
 | claude-sonnet-5 | 0.615 | 225 |
@@ -24,16 +24,16 @@ selection used synthetic validation CER only.
 | gpt-5.6-luna | 0.735 | 225 |
 | claude-haiku-4-5 | 0.905 | 225 |
 
-Best configuration: **this model (beam 12 + char LM)** at 0.273 median CER.
+Best configuration: **this model (beam 12 + char LM)** at 0.234 median CER.
 
 Full statistics, including the no-drop median that charges blank outputs the
 full 1.0 rather than dropping them from the median as the leaderboard does:
 
 | configuration | CER median | no-drop median | micro CER | word cov | scored |
 |---|---|---|---|---|---|
-| this model (greedy) | 0.303 | 0.303 | 0.344 | 0.210 | 225/225 |
-| this model (beam 12) | 0.293 | 0.293 | 0.336 | 0.218 | 225/225 |
-| this model (beam 12 + char LM) | 0.273 | 0.286 | 0.324 | 0.316 | 217/225 |
+| this model (greedy) | 0.250 | 0.260 | 0.287 | 0.267 | 217/225 |
+| this model (beam 12) | 0.250 | 0.255 | 0.282 | 0.271 | 218/225 |
+| this model (beam 12 + char LM) | 0.234 | 0.240 | 0.263 | 0.377 | 214/225 |
 
 ## Full-page mode
 
@@ -43,16 +43,16 @@ full 1.0 rather than dropping them from the median as the leaderboard does:
 | gpt-5.6-sol | 0.462 | 0.400 |
 | gemini-flash-lite | 0.453 | 0.353 |
 | claude-opus-5 | 0.335 | 0.532 |
+| **this model (beam 12 + char LM)** | 0.334 | 0.389 |
 | gpt-5.6-terra | 0.270 | 0.599 |
-| **this model (beam 12 + char LM)** | 0.229 | 0.529 |
+| **this model (beam 12)** | 0.225 | 0.415 |
 | gemini-flash | 0.215 | 0.764 |
+| **this model (greedy)** | 0.212 | 0.416 |
 | claude-sonnet-5 | 0.210 | 0.619 |
 | gpt-5.6-luna | 0.199 | 1.297 |
 | claude-haiku-4-5 | 0.197 | 0.793 |
-| **this model (beam 12)** | 0.132 | 0.529 |
-| **this model (greedy)** | 0.131 | 0.536 |
 
-Best configuration: **this model (beam 12 + char LM)** at 0.229 word coverage.
+Best configuration: **this model (beam 12 + char LM)** at 0.334 word coverage.
 
 Segmentation recall (fraction of gold lines the segmenter finds, at 50% area
 coverage) is **96.0%**, 216 of 225, measured by `scripts/eval_segmentation.py`.
@@ -66,10 +66,10 @@ pointing out twice. Both readings of the best configuration:
 
 | metric | this model | nearest published model |
 |---|---|---|
-| leaderboard rule (blanks dropped) | 0.273 over 217 lines | gemini-flash-lite 0.280 over 225 |
-| no-drop (a blank scores 1.0) | 0.286 | 0.280 |
+| leaderboard rule (blanks dropped) | 0.234 over 214 lines | gemini-flash-lite 0.280 over 225 |
+| no-drop (a blank scores 1.0) | 0.240 | 0.280 |
 
-So this model wins on the board's own metric and loses on the stricter one. gemini-flash-lite returned text for all 225 lines, so its no-drop median is also 0.280; ours is inflated by 8 dropped line(s). Treat the two as a tie until the blanks are recovered.
+This model is ahead of gemini-flash-lite on both readings, so the ranking does not depend on the blank-dropping rule.
 
 ## Reading these numbers
 

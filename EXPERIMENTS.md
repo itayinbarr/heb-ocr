@@ -11,10 +11,11 @@ never used to select a checkpoint.
 | v3 | + glyph lines, wrong letter proportions | neutral | yod drawn at twice its real size |
 | v4 | + glyph lines, measured proportions | 0.327 (0.306 with beam + LM) | shipped |
 | v5 | + EMA, perspective, show-through | superseded | folded into v6 |
-| v6 | + 11k real Arabic and English lines | **0.303 (0.273 with beam + LM)** | **shipped, published** |
+| v6 | + 11k real Arabic and English lines | 0.303 (0.273 with beam + LM) | superseded by v10 |
 | v7 | TrOCR pretrained encoder, lr 1e-4 | stopped at epoch 2 | CTC collapsed to all-blank |
 | v8 | same, lr 2e-4, head 5x | stopped at epoch 0 | collapse got worse |
 | v9 | same, plus augmentation ramp | 0.466 | collapse fixed, but a clear transfer ceiling |
+| v10 | back to v6, real ink scaled 11k to 56k lines | **0.250 (0.234 with beam + LM)** | **best; shipped** |
 
 ## The pretrained encoder did not work, and the reason is interesting
 
