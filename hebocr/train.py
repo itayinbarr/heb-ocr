@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader
 from .charset import BLANK, Charset
 from .data.synth import (
     LineDataset, MixedLineDataset, PixelBudgetSampler, build_glyph_lines,
-    collate, image_widths, load_diffusionpen, load_real_ink,
+    ALL_REAL_INK, collate, image_widths, load_diffusionpen, load_real_ink,
 )
 from .decode import greedy_decode
 from .metrics import line_report
@@ -44,6 +44,7 @@ class Config:
     max_concat: int = 3
     glyph_lines: int = 0
     real_ink: tuple = ()
+    real_ink_cap: int | None = None
     eval_batch_size: int = 12
     lr: float = 3e-4
     min_lr: float = 1e-6
@@ -179,7 +180,11 @@ def main() -> int:
     ap.add_argument("--glyph-lines", type=int, default=0,
                     help="how many training lines to compose from real HHD glyphs")
     ap.add_argument("--real-ink", default="",
-                    help="comma-separated real-handwriting sources to mix in (khatt,iam)")
+                    help="comma-separated real-handwriting sources, or 'all'")
+    ap.add_argument("--real-ink-cap", type=int, default=None,
+                    help="override the per-source line cap; 0 means uncapped")
+    ap.add_argument("--init-from", default=None,
+                    help="load model weights from a checkpoint, without its optimizer or epoch")
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--accum-steps", type=int, default=1)
     ap.add_argument("--sam", action="store_true", help="use SAM (2x step cost)")
@@ -200,7 +205,9 @@ def main() -> int:
         epochs=args.epochs, lr=args.lr,
         pixel_budget=args.pixel_budget, max_batch=args.max_batch, concat_prob=args.concat_prob,
         glyph_lines=args.glyph_lines,
-        real_ink=tuple(x for x in args.real_ink.split(",") if x),
+        real_ink=(ALL_REAL_INK if args.real_ink.strip() == "all"
+                  else tuple(x for x in args.real_ink.split(",") if x)),
+        real_ink_cap=args.real_ink_cap,
         accum_steps=args.accum_steps, use_sam=args.sam, aug_strength=args.aug_strength,
         mask_ratio=args.mask_ratio, num_workers=args.num_workers, ema_decay=args.ema,
         train_limit=args.train_limit, val_limit=args.val_limit, seed=args.seed,
@@ -229,7 +236,7 @@ def main() -> int:
     extra_sources, extra_widths = [], []
     if cfg.real_ink:
         print(f"loading real handwriting: {', '.join(cfg.real_ink)}", flush=True)
-        for name, ds in load_real_ink(cfg.real_ink):
+        for name, ds in load_real_ink(cfg.real_ink, cap_override=cfg.real_ink_cap):
             extra_sources.append(ds)
             extra_widths.append(image_widths(ds, cache=str(out / f"widths_{name}.npy")))
             print(f"  {name}: {len(ds)} real lines", flush=True)
@@ -349,6 +356,23 @@ def main() -> int:
     steps_per_epoch = math.ceil(len(sampler) / cfg.accum_steps)
     total_steps = steps_per_epoch * cfg.epochs
     start_epoch, step, best_val = 0, 0, float("inf")
+
+    if args.init_from:
+        # Stage two of a two-stage run: keep the learned weights, discard the
+        # optimizer state and epoch counter so the new schedule starts clean.
+        # The head is only reloaded when the charset matches, since a different
+        # data mix produces a different alphabet.
+        state = torch.load(args.init_from, map_location=device, weights_only=False)
+        incoming = state["model"]
+        own = model.state_dict()
+        kept = {k: v for k, v in incoming.items() if k in own and own[k].shape == v.shape}
+        skipped = sorted(set(own) - set(kept))
+        model.load_state_dict(kept, strict=False)
+        print(
+            f"initialized from {args.init_from}: loaded {len(kept)}/{len(own)} tensors"
+            + (f", reinitialized {len(skipped)} (shape change)" if skipped else ""),
+            flush=True,
+        )
 
     if args.resume:
         ck = torch.load(args.resume, map_location=device)

@@ -201,6 +201,11 @@ def build_model(n_classes: int, size: str = "base", **overrides) -> HTRVT:
         "small": dict(dim=256, depth=4, heads=4, cnn_width=192),
         "base": dict(dim=384, depth=6, heads=6, cnn_width=256),
         "large": dict(dim=512, depth=8, heads=8, cnn_width=320),
+        # Sized for a corpus an order of magnitude larger than the one `base`
+        # was chosen for. At ~150k mostly-synthetic lines the model was data
+        # limited and extra capacity bought nothing; at 700k with 80 percent
+        # real ink that is no longer obviously true.
+        "xl": dict(dim=640, depth=8, heads=10, cnn_width=384),
     }
     if size not in presets:
         raise ValueError(f"unknown size {size!r}, expected one of {sorted(presets)}")

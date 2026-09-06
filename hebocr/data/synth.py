@@ -460,20 +460,28 @@ def build_glyph_lines(texts, count: int, seed: int = 0, split: str = "train"):
 REAL_INK_SOURCES = {
     # Arabic: right-to-left and cursive, structurally the nearest script to
     # Hebrew among the large public handwriting corpora.
-    "khatt": ("johnlockejrr/KHATT_v1.0_dataset", "train", None),
-    # English: left-to-right, but real modern pen on paper at scale.
-    "iam": ("Teklia/IAM-line", "train", None),
-    # Norwegian, 19th and 20th century. By far the largest real-handwriting
-    # corpus available under a permissive licence, and capped rather than used
-    # whole: 222k lines would outnumber the Hebrew data and the point is to
-    # supply ink, not to make the model bilingual.
-    "norhand": ("Teklia/NorHand-v3-line", "train", 30000),
-    # French civil records, another real hand on real paper.
+    "khatt": ("johnlockejrr/KHATT_v1.0_dataset", "train", 6000),
+    "iam": ("Teklia/IAM-line", "train", 7000),
+    "norhand3": ("Teklia/NorHand-v3-line", "train", 30000),
+    "norhand2": ("Teklia/NorHand-v2-line", "train", 20000),
     "belfort": ("Teklia/Belfort-line", "train", 15000),
+    "alcar": ("Teklia/HOME-Alcar-line", "train", 20000),
+    "newseye": ("Teklia/NewsEye-Austrian-line", "train", 20000),
+    # Chinese. A completely unrelated writing system, included precisely
+    # because the transferable signal is ink rather than language: if that
+    # claim holds, script similarity should not be a prerequisite.
+    "casia": ("Teklia/CASIA-HWDB2-line", "train", 20000),
+    "himanis": ("Teklia/Himanis-line", "train", 15000),
+    "rimes": ("Teklia/RIMES-2011-line", "train", 10000),
+    "esposalles": ("Teklia/Esposalles-line", "train", 2328),
+    "popp": ("Teklia/POPP-line", "train", 3835),
 }
 
+# Every source, for the pretraining stage where the point is volume of real ink.
+ALL_REAL_INK = tuple(REAL_INK_SOURCES)
 
-def load_real_ink(names=("khatt", "iam")):
+
+def load_real_ink(names=("khatt", "iam"), cap_override: int | None = None):
     """Load real-handwriting line datasets. Returns [(name, dataset), ...].
 
     A source that fails to load is skipped with a warning rather than killing
@@ -487,6 +495,8 @@ def load_real_ink(names=("khatt", "iam")):
         if name not in REAL_INK_SOURCES:
             raise ValueError(f"unknown real-ink source {name!r}")
         repo, split, cap = REAL_INK_SOURCES[name]
+        if cap_override is not None:
+            cap = None if cap_override <= 0 else cap_override
         try:
             ds = load_dataset(repo, split=split)
         except Exception as exc:  # noqa: BLE001
