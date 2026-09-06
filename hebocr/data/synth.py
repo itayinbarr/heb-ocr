@@ -467,9 +467,13 @@ REAL_INK_SOURCES = {
     "belfort": ("Teklia/Belfort-line", "train", 15000),
     "alcar": ("Teklia/HOME-Alcar-line", "train", 20000),
     "newseye": ("Teklia/NewsEye-Austrian-line", "train", 20000),
-    # Chinese. A completely unrelated writing system, included precisely
-    # because the transferable signal is ink rather than language: if that
-    # claim holds, script similarity should not be a prerequisite.
+    # Chinese. Registered, but deliberately left out of ALL_REAL_INK below.
+    # Including it takes the charset from 197 classes to 1,837, so 6 percent of
+    # the data would claim 87 percent of the output layer. Capping the alphabet
+    # instead is worse: CASIA's 300 most frequent characters cover only 68
+    # percent of its text, so a third of every line would go unlabelled, and
+    # partial labels are precisely what CTC cannot tolerate. Pass it explicitly
+    # to --real-ink if you want it.
     "casia": ("Teklia/CASIA-HWDB2-line", "train", 20000),
     "himanis": ("Teklia/Himanis-line", "train", 15000),
     "rimes": ("Teklia/RIMES-2011-line", "train", 10000),
@@ -477,8 +481,10 @@ REAL_INK_SOURCES = {
     "popp": ("Teklia/POPP-line", "train", 3835),
 }
 
-# Every source, for the pretraining stage where the point is volume of real ink.
-ALL_REAL_INK = tuple(REAL_INK_SOURCES)
+# Every source worth pretraining on. Excludes CASIA for the alphabet reason
+# above; the claim that ink transfers across scripts is already carried by the
+# Latin and Arabic corpora, which share no letters with Hebrew either.
+ALL_REAL_INK = tuple(n for n in REAL_INK_SOURCES if n != "casia")
 
 
 def load_real_ink(names=("khatt", "iam"), cap_override: int | None = None):
