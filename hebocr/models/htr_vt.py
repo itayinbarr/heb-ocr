@@ -195,19 +195,24 @@ class HTRVT(nn.Module):
         return F.log_softmax(self.head(x), dim=-1)
 
 
-def build_model(n_classes: int, size: str = "base", **overrides) -> HTRVT:
-    """Named presets. `small` is the fast iteration model, `base` the default."""
-    presets = {
+# Module-level so the CLI can derive its --size choices from it. Keeping the
+# two in separate places is how an added preset shipped as an argparse rejection
+# that killed a launch and left the GPU idle for seven hours.
+MODEL_PRESETS = {
         "small": dict(dim=256, depth=4, heads=4, cnn_width=192),
         "base": dict(dim=384, depth=6, heads=6, cnn_width=256),
         "large": dict(dim=512, depth=8, heads=8, cnn_width=320),
-        # Sized for a corpus an order of magnitude larger than the one `base`
-        # was chosen for. At ~150k mostly-synthetic lines the model was data
-        # limited and extra capacity bought nothing; at 700k with 80 percent
-        # real ink that is no longer obviously true.
-        "xl": dict(dim=640, depth=8, heads=10, cnn_width=384),
-    }
-    if size not in presets:
-        raise ValueError(f"unknown size {size!r}, expected one of {sorted(presets)}")
-    cfg = {**presets[size], **overrides}
+    # Sized for a corpus an order of magnitude larger than the one `base` was
+    # chosen for. At ~150k mostly-synthetic lines the model was data limited and
+    # extra capacity bought nothing; at 700k with most of it real ink that is no
+    # longer obviously true.
+    "xl": dict(dim=640, depth=8, heads=10, cnn_width=384),
+}
+
+
+def build_model(n_classes: int, size: str = "base", **overrides) -> HTRVT:
+    """Named presets. `small` is the fast iteration model, `base` the default."""
+    if size not in MODEL_PRESETS:
+        raise ValueError(f"unknown size {size!r}, expected one of {sorted(MODEL_PRESETS)}")
+    cfg = {**MODEL_PRESETS[size], **overrides}
     return HTRVT(n_classes=n_classes, **cfg)

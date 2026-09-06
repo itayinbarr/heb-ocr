@@ -120,3 +120,35 @@ def test_trocr_ctc_checkpoint_roundtrip(charset, tmp_path):
     recognizer = Recognizer(path, device="cpu")
     image = Image.fromarray(np.full((64, 320), 200, np.uint8), mode="L")
     assert isinstance(recognizer.read([image])[0], str)
+
+
+def test_cli_size_choices_match_the_model_presets():
+    """A preset the CLI will not accept is a preset that cannot be trained.
+
+    Adding `xl` to the presets dict without adding it to argparse's choices
+    made a launch die instantly with 'invalid choice', and because the failure
+    was a one-line argparse message rather than a traceback it went unnoticed
+    and left the GPU idle for seven hours.
+    """
+    import argparse
+    from unittest import mock
+
+    from hebocr.models.htr_vt import MODEL_PRESETS
+    import hebocr.train as train
+
+    captured = {}
+    real_add = argparse.ArgumentParser.add_argument
+
+    def spy(self, *args, **kwargs):
+        if args and args[0] == "--size":
+            captured["choices"] = set(kwargs.get("choices", []))
+        return real_add(self, *args, **kwargs)
+
+    with mock.patch.object(argparse.ArgumentParser, "add_argument", spy):
+        with mock.patch("sys.argv", ["train.py", "--help"]):
+            try:
+                train.main()
+            except SystemExit:
+                pass
+
+    assert captured.get("choices") == set(MODEL_PRESETS)

@@ -25,7 +25,7 @@ from .data.synth import (
 )
 from .decode import greedy_decode
 from .metrics import line_report
-from .models.htr_vt import build_model
+from .models.htr_vt import MODEL_PRESETS, build_model
 from .models.trocr_ctc import build_trocr_ctc
 from .optim import SAM, ModelEMA
 
@@ -162,7 +162,7 @@ def evaluate_benchmark(model, charset: Charset, device, amp: bool, batch_size: i
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default="runs/base", help="checkpoint and log directory")
-    ap.add_argument("--size", default="base", choices=["small", "base", "large"])
+    ap.add_argument("--size", default="base", choices=sorted(MODEL_PRESETS))
     ap.add_argument("--arch", default="htrvt", choices=["htrvt", "trocr"],
                     help="htrvt: our from-scratch CNN+ViT. trocr: pretrained handwriting ViT encoder")
     ap.add_argument("--freeze-layers", type=int, default=0,
