@@ -207,7 +207,17 @@ def test_real_ink_cap_override():
     """Stage A wants every line; stage B wants a capped mixture. One switch."""
     from hebocr.data.synth import ALL_REAL_INK, REAL_INK_SOURCES
 
-    assert len(ALL_REAL_INK) == len(REAL_INK_SOURCES)
     # Every source carries a default cap, so a Hebrew-heavy run cannot be
     # accidentally swamped by whichever corpus happens to be largest.
     assert all(cap is not None for _, _, cap in REAL_INK_SOURCES.values())
+    assert set(ALL_REAL_INK) <= set(REAL_INK_SOURCES)
+
+
+def test_chinese_is_registered_but_excluded_from_pretraining():
+    """CASIA stays available by name and out of the default mixture: including
+    it takes the charset from ~200 classes to 1,837, so six percent of the data
+    would claim most of the output layer."""
+    from hebocr.data.synth import ALL_REAL_INK, REAL_INK_SOURCES
+
+    assert "casia" in REAL_INK_SOURCES
+    assert "casia" not in ALL_REAL_INK
