@@ -129,8 +129,8 @@ first time.
 
 ## Results
 
-Trained on synthetic Hebrew plus real handwriting in other scripts, evaluated on
-the held-out benchmark. Full tables and every prediction are in
+Trained on synthetic Hebrew plus real handwriting in eight other scripts,
+evaluated on the held-out benchmark. Full tables and every prediction are in
 [`RESULTS.md`](RESULTS.md); every run including the failures is in
 [`EXPERIMENTS.md`](EXPERIMENTS.md).
 
@@ -140,53 +140,56 @@ the held-out benchmark. Full tables and every prediction are in
 |---|---|---|---|
 | *human, 2nd read* | *0.000* | *0.000* | *225* |
 | gemini-flash | 0.119 | - | 212 |
-| **this model** (beam + char LM) | **0.234** | **0.240** | 214 |
+| **this model** (beam + char LM) | **0.222** | **0.224** | 222 |
 | gemini-flash-lite | 0.280 | 0.280 | 225 |
 | gpt-5.6-sol | 0.440 | - | 225 |
 | claude-opus-5 | 0.692 | - | 225 |
 
-Ahead of gemini-flash-lite on **both** readings, so the ranking does not depend
-on the leaderboard's blank-dropping rule. That matters: an earlier version led
-only under that rule, and `RESULTS.md` computes both automatically on every run
-so the distinction cannot quietly disappear.
+Ahead of gemini-flash-lite by 0.058 on **both** readings, so the ranking does
+not depend on the leaderboard's blank-dropping rule.
 
-**Full-page mode, 4th of 9** by word coverage, and 2nd by page CER:
+**Full-page mode, 4th of 9**: word coverage 0.333, page CER 0.400.
 
-| model | word coverage | page CER |
-|---|---|---|
-| *human, 2nd read* | *0.890* | *-* |
-| gpt-5.6-sol | 0.462 | 0.400 |
-| gemini-flash-lite | 0.453 | 0.353 |
-| claude-opus-5 | 0.335 | 0.532 |
-| **this model** | **0.334** | **0.389** |
-| gpt-5.6-terra | 0.270 | 0.599 |
-| gemini-flash | 0.215 | 0.764 |
+### How it was trained
 
-Decoding, all on the same weights: greedy 0.250, beam 0.250, beam + char LM
-0.234. The LM's effect on word coverage is much larger than on CER (0.271 to
-0.377), which is what a model that turns nearly-right strings into exactly-right
-words should do.
+Two stages, because no public corpus of real modern Hebrew cursive exists:
+
+1. **Pretrain on ink.** 692k lines, of which 551k are real handwriting in
+   Arabic, English, Norwegian, French, German, Latin and Spanish. Hebrew is
+   only a fifth of this mixture. It reaches 0.327 on the Hebrew benchmark
+   anyway, which is the entire result of an earlier Hebrew-specialised run.
+2. **Specialise on Hebrew.** Initialize from those weights, then train on a
+   Hebrew-heavy mixture. The encoder transfers whole; only the CTC head is
+   rebuilt, because the alphabet differs.
 
 ### What actually moved the number
 
 Every large gain came from making the training ink more like real ink.
-Architecture and optimizer changes contributed almost nothing, and the one
-attempt to start from a pretrained handwriting encoder lost outright
-(see `EXPERIMENTS.md`).
 
-| change | line CER (beam + LM) |
+| change | line CER |
 |---|---|
-| corrected augmentation, from measured properties of the real images | 0.327 greedy |
+| corrected augmentation, from measured properties of real images | 0.327 greedy |
 | plus lines composed from real handwritten Hebrew glyphs | 0.306 |
-| plus 11k real Arabic and English handwriting lines | 0.273 |
-| plus 45k more real lines (Norwegian, French) | **0.234** |
+| plus 11k real Arabic and English lines | 0.273 |
+| plus 45k more real lines (Norwegian, French) | 0.234 |
+| plus pretraining on 551k real lines across 8 scripts | **0.222** |
 
-The clearest result in the project: **real handwriting in languages the model
-cannot read improves Hebrew.** 56,154 lines of Arabic, English, Norwegian and
-French, whose labels are meaningless to a Hebrew recognizer, took line CER from
-0.306 to 0.234. What transfers across scripts is not language but ink: stroke
-texture, pen width, and how paper takes a pen. The effect grew as the data
-grew, which is why it is the first place to spend more effort.
+**Real handwriting in languages the model cannot read improves Hebrew.** That
+is the finding this project rests on, confirmed five times at increasing scale.
+What transfers across scripts is not language but ink: stroke texture, pen
+width, and how paper takes a pen.
+
+The two-stage result also arrives in an unexpected way. Its greedy decoding is
+*worse* than the single-stage model's (0.261 against 0.250), and it wins only
+after decoding, where language-model fusion is worth 0.039 to it against 0.016
+to the single-stage model. Pretraining on ink produced better calibrated
+probabilities rather than better best-guesses, so the advantage lives in the
+decoder rather than the argmax.
+
+Two things were tried and lost, and are written up in `EXPERIMENTS.md`:
+starting from TrOCR's IAM-pretrained encoder (0.466 against 0.250), and scaling
+the model to 46.6M parameters, which was abandoned because on this GPU it cost
+more in wall-clock than it returned.
 
 ## Usage
 

@@ -15,7 +15,9 @@ never used to select a checkpoint.
 | v7 | TrOCR pretrained encoder, lr 1e-4 | stopped at epoch 2 | CTC collapsed to all-blank |
 | v8 | same, lr 2e-4, head 5x | stopped at epoch 0 | collapse got worse |
 | v9 | same, plus augmentation ramp | 0.466 | collapse fixed, but a clear transfer ceiling |
-| v10 | back to v6, real ink scaled 11k to 56k lines | **0.250 (0.234 with beam + LM)** | **best; shipped** |
+| v10 | back to v6, real ink scaled 11k to 56k lines | 0.250 (0.234 with beam + LM) | superseded by v11 |
+| v11a | pretrain 30.2M on 692k lines, 551k of them real ink in 8 scripts | 0.327 after 2 epochs | pretraining stage |
+| v11b | specialise v11a on Hebrew, 10 epochs | **0.261 (0.222 with beam + LM)** | **best; shipped** |
 
 ## The pretrained encoder did not work, and the reason is interesting
 
@@ -70,3 +72,20 @@ Ranked by measured effect, largest first:
 Architecture and optimizer changes contributed almost nothing by comparison.
 The single largest remaining lever is not code: it is the roughly 300
 transcribed pages the ivrit.ai maintainers hold and have not published.
+
+## The two-stage result is stranger than the headline
+
+Stage B is *worse* than the single-stage v10 at greedy decoding, 0.261 against
+0.250, and better only after decoding, 0.222 against 0.234. The difference is
+what language-model fusion is worth to each model: 0.039 to the pretrained one
+and 0.016 to the other.
+
+So pretraining on half a million lines of foreign handwriting did not make the
+model's best guess better. It made its probability distribution better, which a
+beam search and a character language model can exploit and an argmax cannot.
+Reading only the greedy number, as this project did while the run was going,
+made the experiment look like a failure until the final evaluation.
+
+The practical lesson: when a change alters how a model is trained, compare it
+under the decoder you actually ship with, not the cheap one used for progress
+logging.
