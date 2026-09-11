@@ -1,0 +1,32 @@
+[ab] arm A, no SAM, 8 epochs (2026-09-11 14:54:55)
+[ab] arm A finished (2026-09-11 17:53:34)
+[ab] arm B, SAM, 4 epochs (2026-09-11 17:53:34)
+[ab] arm B finished (2026-09-11 20:48:07)
+[ab] both arms done (2026-09-11 20:48:07)
+
+no SAM
+  epoch   hours   val CER  bench CER  bench wcov
+      0    0.36    0.0968     0.3846      0.1109
+      1    0.72    0.0606     0.2920      0.1900
+      2    1.09    0.0588     0.3031      0.2063
+      3    1.45    0.0588     0.2857      0.2308
+      4    1.81    0.0541     0.2857      0.2405
+      5    2.17    0.0526     0.2865      0.2235
+      6    2.53    0.0526     0.2857      0.2413
+      7    2.90    0.0500     0.2653      0.2533
+
+SAM
+  epoch   hours   val CER  bench CER  bench wcov
+      0    0.72    0.1034     0.4085      0.1150
+      1    1.43    0.0667     0.3095      0.1930
+      2    2.15    0.0600     0.2951      0.2160
+      3    2.87    0.0577     0.3026      0.2072
+
+==============================================================
+no SAM: best benchmark CER 0.2653 in 2.90h over 8 epochs
+SAM:    best benchmark CER 0.2951 in 2.87h over 4 epochs
+
+SAM is behind by 0.0298 (-11.2% relative) at comparable wall clock.
+The two extra passes per step buy less than twice the ordinary steps do.
+Run the long job without it.
+==============================================================

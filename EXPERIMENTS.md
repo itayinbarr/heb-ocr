@@ -292,3 +292,70 @@ the only way to set hyperparameters without burning the test set, but a decode
 change that looks neutral on it deserves a benchmark run anyway. TTA was only
 included in the pre-registered list because it was cheap to add, and it turned
 out to be the largest win of the three.
+
+# SAM, the optimizer HTR-VT uses and this project never did
+
+`hebocr/optim.py` has implemented Sharpness-Aware Minimization since early on
+and its docstring notes that HTR-VT uses it, but `use_sam` was False in every
+run this project ever did, including both stages of the shipped model. The
+argument for trying it is that flat minima are associated with better
+out-of-distribution transfer, and the gap to real paper is all of the remaining
+error here. The argument against is that it costs two forward/backward passes
+per step, so it has to beat twice as many ordinary steps.
+
+Both arms ran from the stage A pretrain on the same mixture, which for the first
+time included real Hebrew ink. Starting from the shipped checkpoint instead
+would have measured whether SAM helps a short fine-tune escape an already-sharp
+basin, which is a different question. Raw logs in `experiments/sam_ab/`.
+
+| | epochs | hours | best benchmark CER |
+|---|---|---|---|
+| no SAM | 8 | 2.90 | **0.2653** |
+| SAM | 4 | 2.87 | 0.2951 |
+
+At matched wall clock SAM is 11.2 percent behind. That was the comparison the
+experiment was designed to make, and on its own it only says the two extra
+passes are not worth twice the steps.
+
+The per-epoch comparison is stronger and says more. At four epochs each, where
+SAM has had double the compute, no SAM is 0.2857 against SAM's 0.3026. SAM is
+behind per step as well as per second.
+
+## The interesting part is which way each metric moved
+
+At epoch 3, SAM has the **better** synthetic validation CER and the **worse**
+benchmark CER:
+
+| epoch 3 | val CER | benchmark CER |
+|---|---|---|
+| no SAM | 0.0588 | 0.2857 |
+| SAM | 0.0577 | 0.3026 |
+
+It fit the training distribution slightly better and transferred slightly worse,
+which is the precise opposite of the reason to reach for it.
+
+That is now the third time this project has met that shape. The TrOCR
+pretrained encoder fit as well as the from-scratch model and transferred far
+worse. The frame-averaged ensemble is a different failure but the same lesson
+about an argument that sounds right in the abstract. And now an optimizer chosen
+specifically for generalization generalizes worse while optimizing better.
+
+The common thread is worth stating plainly, because it has now cost three
+experiments: on this problem, anything that improves the fit to synthetic Hebrew
+should be assumed neutral-to-harmful on real paper until measured on real paper.
+Synthetic validation CER is not a proxy for the thing being optimized. It is a
+proxy for the thing that is already solved.
+
+## What this does not establish
+
+Four epochs is short and sharpness-aware methods are sometimes a long-horizon
+effect. `rho` was left at HTR-VT's 0.05 and never tuned, and SAM is known to be
+sensitive to it. The mixture had foreign ink capped to a quarter of its usual
+volume to fit the comparison into an afternoon. None of that is evidence SAM is
+useless; it is evidence that SAM does not pay at this budget on this problem,
+which was the only question being asked.
+
+One observation that mattered more for what came next: the no-SAM arm was still
+improving when its budget ran out, sitting at 0.2857 for four consecutive epochs
+and then dropping to 0.2653 on the last one. It had not converged, which is the
+main reason the long run gets twelve epochs rather than eight.
