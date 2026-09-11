@@ -40,7 +40,10 @@ COMMON=(
     --real-hebrew all
     --real-ink all
     --real-ink-cap 8000
-    --pixel-budget 24000
+    # 22000 rather than the 24000 the shipped run used: a couple of hundred
+    # megabytes of headroom is cheap, and losing a multi-day run at hour thirty
+    # to a transient allocation is not.
+    --pixel-budget 22000
     --concat-prob 0.35
     --num-workers 10
     --lr 1.5e-4
@@ -50,6 +53,20 @@ COMMON=(
 
 if [ ! -f "$INIT" ]; then
     echo "missing $INIT; the A/B starts from the stage A pretrain" >&2
+    exit 1
+fi
+
+# Refuse to start if something else holds the card. The first attempt at this
+# A/B died forty seconds in because mogli-asr.service is set to restart and had
+# come back between freeing the GPU and launching, leaving 1.1 GB gone and the
+# pixel budget, which was tuned against a free card, no longer affordable. An
+# out-of-memory error an hour into a run reads like a bad hyperparameter; it is
+# cheaper to refuse up front and say what is holding the memory.
+BUSY="$(nvidia-smi --query-compute-apps=pid,used_memory,process_name --format=csv,noheader 2>/dev/null)"
+if [ -n "$BUSY" ]; then
+    echo "the GPU is not free, refusing to start:" >&2
+    echo "$BUSY" >&2
+    echo "stop those first (mogli-asr.service and llama-server are the usual two)" >&2
     exit 1
 fi
 
