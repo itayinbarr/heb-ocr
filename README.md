@@ -8,8 +8,9 @@ entirely on synthetic Hebrew handwriting, plus a classical segment-then-recogniz
 pipeline for full-page mode. Everything runs on one 8 GB GPU.
 
 **Released weights: [`itayinbar/Mishkefet-v1`](https://huggingface.co/itayinbar/Mishkefet-v1)**,
-30.2M parameters, second of nine on the leaderboard's line mode at 0.222 median
-CER. It runs on a CPU, needs no API key, and costs nothing per line.
+30.2M parameters, second of nine on the leaderboard's line mode at 0.213 median
+CER, third of nine on full-page mode at 0.349 word coverage. It runs on a CPU,
+needs no API key, and costs nothing per line.
 
 ## What the target actually is
 
@@ -145,15 +146,17 @@ evaluated on the held-out benchmark. Full tables and every prediction are in
 |---|---|---|---|
 | *human, 2nd read* | *0.000* | *0.000* | *225* |
 | gemini-flash | 0.119 | - | 212 |
-| **this model** (beam + char LM) | **0.222** | **0.224** | 222 |
+| **this model** (beam + char LM + TTA 3) | **0.213** | **0.214** | 223 |
 | gemini-flash-lite | 0.280 | 0.280 | 225 |
 | gpt-5.6-sol | 0.440 | - | 225 |
 | claude-opus-5 | 0.692 | - | 225 |
 
-Ahead of gemini-flash-lite by 0.058 on **both** readings, so the ranking does
+Ahead of gemini-flash-lite by 0.067 on **both** readings, so the ranking does
 not depend on the leaderboard's blank-dropping rule.
 
-**Full-page mode, 4th of 9**: word coverage 0.333, page CER 0.400.
+**Full-page mode, 3rd of 9**: word coverage 0.349, page CER 0.413, using the
+word prior rather than TTA. Ahead of claude-opus-5 at 0.335, by 0.014, which is
+thin enough that the maintainers' harness should settle it.
 
 ### How it was trained
 
@@ -177,7 +180,8 @@ Every large gain came from making the training ink more like real ink.
 | plus lines composed from real handwritten Hebrew glyphs | 0.306 |
 | plus 11k real Arabic and English lines | 0.273 |
 | plus 45k more real lines (Norwegian, French) | 0.234 |
-| plus pretraining on 551k real lines across 8 scripts | **0.222** |
+| plus pretraining on 551k real lines across 8 scripts | 0.222 |
+| plus multi-scale reading at decode time, no retraining | **0.213** |
 
 **Real handwriting in languages the model cannot read improves Hebrew.** That
 is the finding this project rests on, confirmed five times at increasing scale.
@@ -205,19 +209,27 @@ model repository and run them:
 
 ```bash
 pip install -e .
-huggingface-cli download itayinbar/Mishkefet-v1 mishkefet-v1.pt hebrew_char6.pkl --local-dir .
+huggingface-cli download itayinbar/Mishkefet-v1 \
+    mishkefet-v1.pt hebrew_char6.pkl hebrew_words.pkl --local-dir .
 ```
 
 ```python
 from PIL import Image
 from hebocr.lm import CharNGramLM
 from hebocr.recognize import Recognizer
+from hebocr.wordlm import WordUnigramLM
 
-model = Recognizer("mishkefet-v1.pt", lm=CharNGramLM.load("hebrew_char6.pkl"),
-                   lm_weight=0.4, beam_width=12)
+# Line mode: multi-scale reading is worth 4 percent and costs 3 forward passes.
+lines = Recognizer("mishkefet-v1.pt", lm=CharNGramLM.load("hebrew_char6.pkl"),
+                   lm_weight=0.4, beam_width=12, tta=3)
+print(lines.read_tta([Image.open("line.jpg")])[0])
 
-print(model.read([Image.open("line.jpg")])[0])        # one cropped line
-transcript, lines = model.read_page(Image.open("page.jpg"))   # a whole page
+# Full-page mode ranks on word coverage, where the word prior is the better
+# trade and TTA is not. Different metric, different configuration.
+pages = Recognizer("mishkefet-v1.pt", lm=CharNGramLM.load("hebrew_char6.pkl"),
+                   lm_weight=0.4, beam_width=12,
+                   word_lm=WordUnigramLM.load("hebrew_words.pkl"), word_weight=0.2)
+transcript, records = pages.read_page(Image.open("page.jpg"))
 ```
 
 ### Reproduce the training
@@ -238,13 +250,22 @@ scripts/run_stage_b.sh
 python scripts/make_results.py runs/stage_b/best.pt --beam-width 12 --lm-weight 0.4
 ```
 
+Decode-time settings are tuned against a held-out dev set, never the benchmark:
+
+```bash
+python scripts/build_wordlm.py --corpus hebrew.txt   # the word prior
+python scripts/make_devset.py --strength 2.2         # the tuning set
+python scripts/tune_decode.py --stage baseline       # grid-search a lever
+python scripts/eval_configs.py --configs decode/benchmark_configs.json --pages
+```
+
 Stage A is about 6 hours on an RTX 5070 and stage B about 13.5, so the pipeline
 scripts are built to be detached and to survive a dropped session.
 
 ```bash
 python scripts/eval_segmentation.py      # segmentation recall, no model needed
 python scripts/human_floor.py            # the human noise floor
-pytest -q                                # 118 tests
+pytest -q                                # 140 tests
 ```
 
 The benchmark is gated: accept the license at
@@ -265,8 +286,9 @@ with your own account first.
   are the test pages. Its parameters are derived from image statistics rather
   than hand-tuned constants specifically to limit that contamination, but the
   exposure is not zero and should be read as a caveat on the full-page number.
-- **Not attempted:** the VLM/QLoRA second track and ROVER ensembling, because an
-  8 GB card cannot hold a 3B VLM.
+- **Not attempted:** the VLM/QLoRA second track, because an 8 GB card cannot hold
+  a 3B VLM. ROVER ensembling *was* attempted and is worth only 1.7 percent here;
+  `EXPERIMENTS.md` explains why the dev set promised six times that.
 
 ## Data and licensing
 

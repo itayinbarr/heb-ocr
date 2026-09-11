@@ -312,6 +312,17 @@ class Augment:
 
     def __call__(self, image) -> np.ndarray:
         """Augmented line -> the same (1, H, W) float array `preprocess` yields."""
+        return preprocess(self.augment_gray(image))
+
+    def augment_gray(self, image) -> np.ndarray:
+        """The augmentation chain alone, returning a grayscale image.
+
+        Split out of `__call__` so an evaluation set can be built from the same
+        pipeline the model trains against and still be handled as an image,
+        rather than as an already-normalized tensor. Test-time augmentation and
+        segmentation both need to resize, and neither can do that to a
+        normalized array.
+        """
         gray = _to_gray(image)
         original_ink = ink_fraction(gray)
 
@@ -345,5 +356,5 @@ class Augment:
         # writing, fall back to the untouched crop rather than hand the model a
         # blank image paired with a full transcription.
         if ink_fraction(gray) < original_ink * 0.15:
-            return preprocess(_to_gray(image))
-        return preprocess(gray)
+            return _to_gray(image)
+        return gray

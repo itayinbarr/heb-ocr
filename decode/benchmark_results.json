@@ -1,0 +1,210 @@
+[
+  {
+    "name": "greedy",
+    "spec": {
+      "name": "greedy",
+      "kind": "single",
+      "checkpoint": "runs/stage_b/best.pt",
+      "beam_width": 0
+    },
+    "cer_median": 0.2608695652173913,
+    "cer_median_nodrop": 0.2608695652173913,
+    "cer_micro": 0.30584192439862545,
+    "wcov": 0.24519510774606873,
+    "n_scored": 225,
+    "n_total": 225,
+    "seconds": 2.225813150405884
+  },
+  {
+    "name": "beam 12",
+    "spec": {
+      "name": "beam 12",
+      "kind": "single",
+      "checkpoint": "runs/stage_b/best.pt",
+      "beam_width": 12
+    },
+    "cer_median": 0.2537313432835821,
+    "cer_median_nodrop": 0.2537313432835821,
+    "cer_micro": 0.29963418689723975,
+    "wcov": 0.250436808386721,
+    "n_scored": 225,
+    "n_total": 225,
+    "seconds": 7.33005952835083
+  },
+  {
+    "name": "beam 12 + char LM (shipped)",
+    "spec": {
+      "name": "beam 12 + char LM (shipped)",
+      "kind": "single",
+      "checkpoint": "runs/stage_b/best.pt",
+      "beam_width": 12,
+      "char_weight": 0.4,
+      "pages": true
+    },
+    "cer_median": 0.2222222222222222,
+    "cer_median_nodrop": 0.2236842105263158,
+    "cer_micro": 0.2742812742812743,
+    "wcov": 0.3763127187864644,
+    "n_scored": 222,
+    "n_total": 225,
+    "seconds": 10.010361194610596,
+    "page_wcov": 0.33313919627256844,
+    "page_cer": 0.3998484192291035
+  },
+  {
+    "name": "beam 12 + char LM + word prior 0.2",
+    "spec": {
+      "name": "beam 12 + char LM + word prior 0.2",
+      "kind": "single",
+      "checkpoint": "runs/stage_b/best.pt",
+      "beam_width": 12,
+      "char_weight": 0.4,
+      "word_weight": 0.2,
+      "pages": true
+    },
+    "cer_median": 0.2222222222222222,
+    "cer_median_nodrop": 0.2222222222222222,
+    "cer_micro": 0.2717186286475092,
+    "wcov": 0.397667638483965,
+    "n_scored": 223,
+    "n_total": 225,
+    "seconds": 10.177629947662354,
+    "page_wcov": 0.34886429819452536,
+    "page_cer": 0.41273278475530534
+  },
+  {
+    "name": "beam 12 + char LM + TTA 3",
+    "spec": {
+      "name": "beam 12 + char LM + TTA 3",
+      "kind": "single",
+      "checkpoint": "runs/stage_b/best.pt",
+      "beam_width": 12,
+      "char_weight": 0.4,
+      "tta": 3
+    },
+    "cer_median": 0.21333333333333335,
+    "cer_median_nodrop": 0.21348314606741572,
+    "cer_micro": 0.25318983690225233,
+    "wcov": 0.4075801749271137,
+    "n_scored": 223,
+    "n_total": 225,
+    "seconds": 30.907348155975342
+  },
+  {
+    "name": "v10 alone, beam 12 + char LM",
+    "spec": {
+      "name": "v10 alone, beam 12 + char LM",
+      "kind": "single",
+      "checkpoint": "runs/base/best.pt",
+      "beam_width": 12,
+      "char_weight": 0.4
+    },
+    "cer_median": 0.23380867498514557,
+    "cer_median_nodrop": 0.24,
+    "cer_micro": 0.26296420207427235,
+    "wcov": 0.37653958944281524,
+    "n_scored": 214,
+    "n_total": 225,
+    "seconds": 9.930729866027832
+  },
+  {
+    "name": "v6 alone, beam 12 + char LM",
+    "spec": {
+      "name": "v6 alone, beam 12 + char LM",
+      "kind": "single",
+      "checkpoint": "runs/base_v6_realink/best.pt",
+      "beam_width": 12,
+      "char_weight": 0.4
+    },
+    "cer_median": 0.2727272727272727,
+    "cer_median_nodrop": 0.2857142857142857,
+    "cer_micro": 0.32382343030439176,
+    "wcov": 0.31600708800945065,
+    "n_scored": 217,
+    "n_total": 225,
+    "seconds": 9.710381746292114
+  },
+  {
+    "name": "ROVER x3 + char LM",
+    "spec": {
+      "name": "ROVER x3 + char LM",
+      "kind": "rover",
+      "checkpoints": [
+        "runs/stage_b/best.pt",
+        "runs/base/best.pt",
+        "runs/base_v6_realink/best.pt"
+      ],
+      "weights": [
+        1.0,
+        0.9,
+        0.8
+      ],
+      "beam_width": 12,
+      "char_weight": 0.4,
+      "pages": true
+    },
+    "cer_median": 0.21845174973488865,
+    "cer_median_nodrop": 0.2222222222222222,
+    "cer_micro": 0.26541495389401176,
+    "wcov": 0.38492990654205606,
+    "n_scored": 220,
+    "n_total": 225,
+    "seconds": 29.499967336654663,
+    "page_wcov": 0.3174140943506115,
+    "page_cer": 0.3905370290168904
+  },
+  {
+    "name": "ROVER x3 + char LM + word prior 0.2",
+    "spec": {
+      "name": "ROVER x3 + char LM + word prior 0.2",
+      "kind": "rover",
+      "checkpoints": [
+        "runs/stage_b/best.pt",
+        "runs/base/best.pt",
+        "runs/base_v6_realink/best.pt"
+      ],
+      "weights": [
+        1.0,
+        0.9,
+        0.8
+      ],
+      "beam_width": 12,
+      "char_weight": 0.4,
+      "word_weight": 0.2,
+      "pages": true
+    },
+    "cer_median": 0.22988505747126436,
+    "cer_median_nodrop": 0.23214285714285715,
+    "cer_micro": 0.26550538111616556,
+    "wcov": 0.397667638483965,
+    "n_scored": 223,
+    "n_total": 225,
+    "seconds": 30.125972270965576,
+    "page_wcov": 0.3337216074548631,
+    "page_cer": 0.40233867475097446
+  },
+  {
+    "name": "frame average x2 (negative control)",
+    "spec": {
+      "name": "frame average x2 (negative control)",
+      "kind": "ensemble",
+      "checkpoints": [
+        "runs/stage_b/best.pt",
+        "runs/base/best.pt"
+      ],
+      "weights": [
+        1.0,
+        1.0
+      ],
+      "beam_width": 12,
+      "char_weight": 0.4
+    },
+    "cer_median": 0.4838709677419355,
+    "cer_median_nodrop": 0.5,
+    "cer_micro": 0.4971537001897533,
+    "wcov": 0.15041128084606345,
+    "n_scored": 211,
+    "n_total": 225,
+    "seconds": 10.480721473693848
+  }
+]

@@ -41,6 +41,8 @@ class Recognizer:
         beam_width: int = 0,
         length_bonus: float = 0.6,
         tta: int = 0,
+        word_lm=None,
+        word_weight: float = 0.0,
     ):
         """`beam_width` of 0 means greedy decoding; anything else beam-searches.
 
@@ -52,6 +54,8 @@ class Recognizer:
         self.beam_width = beam_width
         self.length_bonus = length_bonus
         self.tta = tta
+        self.word_lm = word_lm
+        self.word_weight = word_weight
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = torch.device(device)
@@ -83,6 +87,7 @@ class Recognizer:
         images: list[Image.Image],
         batch_size: int = 12,
         return_confidence: bool = False,
+        emitting_only: bool = False,
     ):
         """Read line crops. Returns texts, or (texts, confidences).
 
@@ -116,12 +121,13 @@ class Recognizer:
                     logprobs, lengths, self.charset,
                     beam_width=self.beam_width, lm=self.lm,
                     lm_weight=self.lm_weight, length_bonus=self.length_bonus,
+                    word_lm=self.word_lm, word_weight=self.word_weight,
                 )
             else:
                 decoded = greedy_decode(logprobs, lengths, self.charset)
             # Confidence always comes from the best path: it is a rejection
             # signal, and a beam's score is not comparable across line lengths.
-            scores = greedy_confidence(logprobs, lengths)
+            scores = greedy_confidence(logprobs, lengths, emitting_only=emitting_only)
             for j, i in enumerate(chunk):
                 texts[i] = decoded[j]
                 confs[i] = scores[j]
@@ -142,8 +148,13 @@ class Recognizer:
 
         Not averaged: CTC outputs at different scales have different numbers of
         time steps, so their logits do not line up and cannot be pooled
-        frame-by-frame. Selecting whole hypotheses by mean best-path probability
-        sidesteps the alignment problem entirely.
+        frame-by-frame. Selecting whole hypotheses sidesteps the alignment
+        problem entirely.
+
+        The selection score counts only the frames that emit a character. The
+        all-frame mean is not comparable between two widths of the same line,
+        because the wider one carries more blank frames and blanks score near
+        1.0, so it would win on width rather than on legibility.
         """
         n_views = max(1, min(self.tta or 1, len(self.TTA_SCALES)))
         if n_views == 1:
@@ -162,7 +173,9 @@ class Recognizer:
                     )
                     for im in images
                 ]
-            texts, confs = self.read(views, batch_size=batch_size, return_confidence=True)
+            texts, confs = self.read(
+                views, batch_size=batch_size, return_confidence=True, emitting_only=True
+            )
             for i, (text, conf) in enumerate(zip(texts, confs)):
                 # An empty read is never preferable to a non-empty one.
                 score = conf if text.strip() else float("-inf")
