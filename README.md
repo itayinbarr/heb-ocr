@@ -7,6 +7,10 @@ A character-level CTC line recognizer (CNN + ViT encoder, after HTR-VT) trained
 entirely on synthetic Hebrew handwriting, plus a classical segment-then-recognize
 pipeline for full-page mode. Everything runs on one 8 GB GPU.
 
+**Released weights: [`itayinbar/Mishkefet-v1`](https://huggingface.co/itayinbar/Mishkefet-v1)**,
+30.2M parameters, second of nine on the leaderboard's line mode at 0.222 median
+CER. It runs on a CPU, needs no API key, and costs nothing per line.
+
 ## What the target actually is
 
 The leaderboard is maintainer-run: there is no submission flow, and the
@@ -104,7 +108,8 @@ noise and JPEG blocking.
 
 ## Design
 
-**Recognizer** (`hebocr/models/htr_vt.py`, ~14M params at `base`), a CNN
+**Recognizer** (`hebocr/models/htr_vt.py`, 13.8M params at `base`, 30.2M at
+`large`, which is the size that ships), a CNN
 front-end feeding a ViT encoder with a CTC head, following HTR-VT
 (Pattern Recognition, 2025). CTC over an autoregressive decoder because it cannot
 enter a repetition loop, which is a documented failure of the VLMs on this exact
@@ -193,17 +198,53 @@ more in wall-clock than it returned.
 
 ## Usage
 
+### Read Hebrew handwriting with the released model
+
+Nothing here needs training. Pull the weights and the character LM from the
+model repository and run them:
+
+```bash
+pip install -e .
+huggingface-cli download itayinbar/Mishkefet-v1 mishkefet-v1.pt hebrew_char6.pkl --local-dir .
+```
+
+```python
+from PIL import Image
+from hebocr.lm import CharNGramLM
+from hebocr.recognize import Recognizer
+
+model = Recognizer("mishkefet-v1.pt", lm=CharNGramLM.load("hebrew_char6.pkl"),
+                   lm_weight=0.4, beam_width=12)
+
+print(model.read([Image.open("line.jpg")])[0])        # one cropped line
+transcript, lines = model.read_page(Image.open("page.jpg"))   # a whole page
+```
+
+### Reproduce the training
+
 ```bash
 uv venv --system-site-packages .venv
 uv pip install --python .venv/bin/python datasets rapidfuzz
 
 python scripts/download_data.py          # accept the benchmark license on HF first
-python -m hebocr.train --out runs/base --size base --epochs 30
-python -m hebocr.evaluate runs/base/best.pt --out results.json
 
+# Stage A, pretrain on ink: 692k lines, 551k of them real, 8 scripts besides Hebrew.
+python -m hebocr.train --out runs/stage_a --size large --epochs 2 \
+    --real-ink all --lr 3e-4 --glyph-lines 25000 --ema 0.9995
+
+# Stage B, specialise on Hebrew from those weights. This is the shipped model.
+scripts/run_stage_b.sh
+
+python scripts/make_results.py runs/stage_b/best.pt --beam-width 12 --lm-weight 0.4
+```
+
+Stage A is about 6 hours on an RTX 5070 and stage B about 13.5, so the pipeline
+scripts are built to be detached and to survive a dropped session.
+
+```bash
 python scripts/eval_segmentation.py      # segmentation recall, no model needed
 python scripts/human_floor.py            # the human noise floor
-pytest -q                                # 81 tests
+pytest -q                                # 118 tests
 ```
 
 The benchmark is gated: accept the license at
@@ -224,12 +265,45 @@ with your own account first.
   are the test pages. Its parameters are derived from image statistics rather
   than hand-tuned constants specifically to limit that contamination, but the
   exposure is not zero and should be read as a caveat on the full-page number.
-- **Not attempted:** the VLM/QLoRA second track and ROVER ensembling (an 8 GB
-  card cannot hold a 3B VLM), and character n-gram LM shallow fusion.
+- **Not attempted:** the VLM/QLoRA second track and ROVER ensembling, because an
+  8 GB card cannot hold a 3B VLM.
 
 ## Data and licensing
 
+No real Hebrew handwriting was used for training, because none is published with
+line-level transcriptions. The ivrit.ai benchmark is test-only by design and was
+never trained on.
+
 | dataset | role | license |
 |---|---|---|
-| `ivrit-ai/hebrew-handwriting-ocr-benchmark` | test only, never trained on | ivrit.ai License (gated) |
-| `cyttic/diffusionpen-hebrew-handwriting` | all training data | CC-BY-4.0 |
+| [`ivrit-ai/hebrew-handwriting-ocr-benchmark`](https://huggingface.co/datasets/ivrit-ai/hebrew-handwriting-ocr-benchmark) | test only, never trained on | ivrit.ai License (gated) |
+| [`cyttic/diffusionpen-hebrew-handwriting`](https://huggingface.co/datasets/cyttic/diffusionpen-hebrew-handwriting) | 116k synthetic Hebrew lines, 491 writer styles | CC-BY-4.0 |
+| [`sivan22/hebrew-handwritten-dataset`](https://huggingface.co/datasets/sivan22/hebrew-handwritten-dataset) | 25k lines composed from real handwritten Hebrew glyphs | CC-BY-3.0 |
+| [`johnlockejrr/KHATT_v1.0_dataset`](https://huggingface.co/datasets/johnlockejrr/KHATT_v1.0_dataset) | 4,672 real Arabic lines | MIT (as published) |
+| [`Teklia/IAM-line`](https://huggingface.co/datasets/Teklia/IAM-line) | 6,482 real English lines | MIT (as published) |
+| [`Teklia/NorHand-v3-line`](https://huggingface.co/datasets/Teklia/NorHand-v3-line) | 30,000 real Norwegian lines | MIT |
+| [`Teklia/Belfort-line`](https://huggingface.co/datasets/Teklia/Belfort-line) | real French lines | MIT |
+| Teklia NorHand-v2, HOME-Alcar, NewsEye, Himanis, RIMES, Esposalles, POPP | the rest of the 551k real pretraining lines | MIT |
+| Hebrew Wikipedia | 30M characters for the character 6-gram LM | CC-BY-SA |
+
+**Licensing caution.** The KHATT and IAM mirrors above are labelled MIT on the
+Hub, but the original KHATT and IAM-DB corpora carry their own terms, and IAM-DB
+has historically been restricted to non-commercial research use. Anyone
+intending commercial use should verify those terms upstream rather than relying
+on the mirrors' labels.
+
+**This repository.** The code is MIT (see [`LICENSE`](LICENSE)). The trained
+weights are released separately under CC-BY-4.0, at
+[`itayinbar/Mishkefet-v1`](https://huggingface.co/itayinbar/Mishkefet-v1), to
+respect the attribution terms of the Hebrew training sources.
+
+## Citation
+
+```bibtex
+@misc{mishkefet2026,
+  title  = {Mishkefet-v1: a compact CTC recognizer for modern Hebrew handwriting},
+  author = {Itay Inbar},
+  year   = {2026},
+  howpublished = {\url{https://huggingface.co/itayinbar/Mishkefet-v1}},
+}
+```

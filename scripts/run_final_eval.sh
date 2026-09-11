@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Wait for stage B, then produce RESULTS.md. Detached, cache-only, no network.
 set -u
-cd /home/itay-inbar/Documents/heb-ocr
-export HF_HUB_OFFLINE=1 PYTHONPATH=/home/itay-inbar/Documents/heb-ocr
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export HF_HUB_OFFLINE=1 PYTHONPATH="$PWD"
 
 echo "[eval] waiting for stage B to exist ($(date '+%F %T'))"
 while [ ! -f runs/stage_b.log ]; do sleep 60; done

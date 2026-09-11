@@ -5,7 +5,7 @@
 # ends. Detached with nohup and needing no network, it survives a dropped
 # session, a closed laptop lid on the controlling machine, or a lost wifi link.
 set -u
-cd /home/itay-inbar/Documents/heb-ocr
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Cached datasets only. A network blip during the benchmark evaluation would
 # otherwise stall a run that has no other reason to touch the network.

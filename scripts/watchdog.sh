@@ -5,7 +5,7 @@
 # seven hours were lost before anyone checked. Silence here means healthy and
 # advancing; any output is a state change worth reading.
 set -u
-cd /home/itay-inbar/Documents/heb-ocr
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 last_state=""
 last_pos=""

@@ -2,6 +2,9 @@
 name = "heb-ocr"
 version = "0.1.0"
 description = "Hebrew handwriting OCR/HTR for the ivrit.ai leaderboard"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Itay Inbar" }]
 requires-python = ">=3.11"
 dependencies = [
     "torch>=2.9",
