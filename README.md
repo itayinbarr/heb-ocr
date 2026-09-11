@@ -108,9 +108,9 @@ noise and JPEG blocking.
 
 ## Design
 
-**Recognizer** (`hebocr/models/htr_vt.py`, 13.8M params at `base`, 30.2M at
-`large`, which is the size that ships), a CNN
-front-end feeding a ViT encoder with a CTC head, following HTR-VT
+**Recognizer** (`hebocr/models/htr_vt.py`, 13.8M params at `base` and 30.2M at
+`large`, which is the size that ships), a CNN front-end feeding a ViT encoder
+with a CTC head, following HTR-VT
 (Pattern Recognition, 2025). CTC over an autoregressive decoder because it cannot
 enter a repetition loop, which is a documented failure of the VLMs on this exact
 board. Character-level output means no tokenizer to mishandle RTL or final
