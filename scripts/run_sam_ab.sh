@@ -28,18 +28,23 @@ PY=.venv/bin/python
 INIT=runs/stage_a/best.pt
 
 # A mixture in the same proportions as the full recipe but small enough that an
-# epoch is about 25 minutes, so the cheaper arm gets eight measurements rather
-# than two. Real Hebrew is NOT capped: there are only 10,219 lines of it, and it
-# is the new variable, so every arm should see all of it.
+# epoch is about 20 minutes, so the cheaper arm gets eight measurements rather
+# than two and the whole comparison fits in a working day. Measured on this card
+# at this budget: 2.5 iterations a second, so roughly 3,000 steps an epoch
+# without SAM and half the rate with it.
+#
+# Real Hebrew is NOT capped. There are only 10,219 lines of it, it is the new
+# variable, and capping the one source being introduced to make room for the
+# ones already known to work would answer a question nobody asked.
 COMMON=(
     --size large
     --init-from "$INIT"
-    --train-limit 40000
+    --train-limit 20000
     --val-limit 2000
-    --glyph-lines 20000
+    --glyph-lines 10000
     --real-hebrew all
     --real-ink all
-    --real-ink-cap 8000
+    --real-ink-cap 4000
     # 22000 rather than the 24000 the shipped run used: a couple of hundred
     # megabytes of headroom is cheap, and losing a multi-day run at hour thirty
     # to a transient allocation is not.
