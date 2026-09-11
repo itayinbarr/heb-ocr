@@ -97,7 +97,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--configs", required=True, help="JSON file of pre-registered configs")
     ap.add_argument("--char-lm", default="runs/lm/hebrew_char6.pkl")
-    ap.add_argument("--word-lm", default="runs/lm_new/hebrew_words.pkl")
+    ap.add_argument("--word-lm", default="runs/lm/hebrew_words.pkl")
     ap.add_argument("--json", default="runs/benchmark_configs.json")
     ap.add_argument("--pages", action="store_true", help="also score full-page mode")
     args = ap.parse_args()
