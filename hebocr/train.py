@@ -43,6 +43,7 @@ class Config:
     concat_prob: float = 0.35
     max_concat: int = 3
     glyph_lines: int = 0
+    real_hebrew: tuple = ()
     real_ink: tuple = ()
     real_ink_cap: int | None = None
     eval_batch_size: int = 12
@@ -159,6 +160,23 @@ def evaluate_benchmark(model, charset: Charset, device, amp: bool, batch_size: i
     return line_report(refs, [hyps[i] for i in range(len(refs))])
 
 
+
+def _hebrew_choice(value: str) -> tuple:
+    """Parse --real-hebrew into corpus names."""
+    from .data.hebrew_ink import SOURCES
+
+    value = (value or "").strip().lower()
+    if not value or value == "none":
+        return ()
+    if value == "all":
+        return tuple(SOURCES)
+    names = tuple(v.strip() for v in value.split(",") if v.strip())
+    unknown = [n for n in names if n not in SOURCES]
+    if unknown:
+        raise SystemExit(f"unknown Hebrew corpus {unknown}, expected {sorted(SOURCES)} or 'all'")
+    return names
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default="runs/base", help="checkpoint and log directory")
@@ -179,6 +197,10 @@ def main() -> int:
                     help="probability of joining lines to match benchmark line lengths")
     ap.add_argument("--glyph-lines", type=int, default=0,
                     help="how many training lines to compose from real HHD glyphs")
+    ap.add_argument("--real-hebrew", default="", metavar="NAMES",
+                    help="real Hebrew corpora to mix in: pinkas, biblia, all, or "
+                         "none. BiblIA is CC-BY-NC-SA-4.0 and changes what the "
+                         "trained weights may be released under")
     ap.add_argument("--real-ink", default="",
                     help="comma-separated real-handwriting sources, or 'all'")
     ap.add_argument("--real-ink-cap", type=int, default=None,
@@ -204,7 +226,7 @@ def main() -> int:
         head_lr_mult=args.head_lr_mult, aug_warmup_epochs=args.aug_warmup_epochs,
         epochs=args.epochs, lr=args.lr,
         pixel_budget=args.pixel_budget, max_batch=args.max_batch, concat_prob=args.concat_prob,
-        glyph_lines=args.glyph_lines,
+        glyph_lines=args.glyph_lines, real_hebrew=_hebrew_choice(args.real_hebrew),
         real_ink=(ALL_REAL_INK if args.real_ink.strip() == "all"
                   else tuple(x for x in args.real_ink.split(",") if x)),
         real_ink_cap=args.real_ink_cap,
@@ -234,6 +256,22 @@ def main() -> int:
     train_widths = image_widths(train_rows, cache=str(out / "train_widths.npy"))
 
     extra_sources, extra_widths = [], []
+
+    # Real Hebrew first, because unlike the foreign corpora these lines are
+    # right-to-left and may take part in concatenation. The sampler decides
+    # that by index, so their position in the list is load-bearing.
+    n_hebrew = 0
+    if cfg.real_hebrew:
+        from .data.hebrew_ink import HebrewInkSource, load_hebrew_ink
+
+        print(f"loading real Hebrew ink: {', '.join(cfg.real_hebrew)}", flush=True)
+        hebrew_rows = load_hebrew_ink(cfg.real_hebrew, seed=cfg.seed)
+        if hebrew_rows:
+            source = HebrewInkSource(hebrew_rows)
+            extra_sources.append(source)
+            extra_widths.append(source.widths())
+            n_hebrew = len(source)
+
     if cfg.real_ink:
         print(f"loading real handwriting: {', '.join(cfg.real_ink)}", flush=True)
         for name, ds in load_real_ink(cfg.real_ink, cap_override=cfg.real_ink_cap):
@@ -268,7 +306,8 @@ def main() -> int:
     train_widths = train_ds.widths(train_widths, extra_widths)
     print(
         f"train items: {len(train_ds)} "
-        f"({len(glyph_items)} glyph-composed, {sum(len(s) for s in extra_sources)} real-ink)",
+        f"({len(glyph_items)} glyph-composed, {n_hebrew} real Hebrew, "
+        f"{sum(len(s) for s in extra_sources) - n_hebrew} real-ink other scripts)",
         flush=True,
     )
     print(
@@ -286,7 +325,7 @@ def main() -> int:
         seed=cfg.seed,
         # Hebrew sources occupy the leading indices; the real-ink lines that
         # follow are left out of concatenation because it assumes RTL.
-        concat_max_index=len(train_rows) + len(glyph_items),
+        concat_max_index=len(train_rows) + len(glyph_items) + n_hebrew,
     )
 
     train_loader = DataLoader(
