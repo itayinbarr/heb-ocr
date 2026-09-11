@@ -15,12 +15,16 @@ samples whose rendering is too degraded to read back.
 
 from dataclasses import dataclass
 
+import os
+
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from PIL import Image
+
 from ..charset import Charset
-from .transforms import Augment, preprocess
+from .transforms import LINE_HEIGHT, Augment, preprocess
 
 DIFFUSIONPEN = "cyttic/diffusionpen-hebrew-handwriting"
 
@@ -382,9 +386,17 @@ class MixedLineDataset(Dataset):
 
     def widths(self, row_widths: np.ndarray, extra_widths: list | None = None) -> np.ndarray:
         """Widths for every item, in the order `__getitem__` indexes them."""
+        # An endless generator knows its widths without drawing anything; a
+        # pre-composed list has to be measured. Asking the generator to
+        # materialize every line here would defeat the point of having one.
+        glyph_widths = getattr(self.glyph_items, "widths", None)
+        if glyph_widths is None:
+            glyph_widths = np.array(
+                [g.shape[1] for g, _ in self.glyph_items], dtype=np.int64
+            )
         parts = [
             np.asarray(row_widths, dtype=np.int64),
-            np.array([g.shape[1] for g, _ in self.glyph_items], dtype=np.int64),
+            np.asarray(glyph_widths, dtype=np.int64),
         ]
         parts.extend(np.asarray(w, dtype=np.int64) for w in (extra_widths or []))
         return np.concatenate(parts)
@@ -452,6 +464,93 @@ def build_glyph_lines(texts, count: int, seed: int = 0, split: str = "train"):
             continue
         items.append((np.asarray(image.convert("L"), dtype=np.uint8), text))
     return items
+
+
+class EndlessGlyphLines:
+    """Glyph-composed lines generated on demand, so the supply is unbounded.
+
+    `build_glyph_lines` pre-composes into memory, which is why the count has
+    always been small: 20,000 lines already costs gigabytes, and the arrays are
+    inherited by every dataloader worker. Scaling the way TrOCR did, where the
+    synthetic corpus is three orders of magnitude larger than this one, cannot
+    be done by pre-composing anything. Twenty million lines at this height is
+    roughly a terabyte.
+
+    Composing per access removes the storage entirely and, as a side effect,
+    removes repetition: a line is drawn fresh every time it is asked for, so
+    the model never sees the same arrangement of glyphs twice no matter how
+    many epochs it runs. The glyph inventory is still finite, so what grows
+    without bound is the number of *arrangements*, not the number of hands.
+    That is worth being precise about: this buys coverage of spacing, sequence
+    and juxtaposition, and buys nothing at all in letterform diversity.
+
+    The one thing the sampler will not tolerate is an unknown width. It budgets
+    a batch by lines times the width of the widest, so it needs a real width per
+    item before any pixels exist, and a guess that comes in low is what turns a
+    planned batch into an out-of-memory error. So the widths are decided first,
+    drawn from the distribution of genuinely composed lines, and each line is
+    then rendered and resized to the width already promised for it. Resizing
+    changes character density, which is not a side effect worth avoiding: it is
+    the same axis the stretch augmentation already varies on purpose.
+    """
+
+    def __init__(self, bank, texts, count: int, seed: int = 0, calibration: int = 512):
+        from .glyphs import GlyphLineDataset
+
+        self.source = GlyphLineDataset(bank, texts, seed=seed)
+        if not len(self.source):
+            # Every text was rejected: too short, or written in characters the
+            # glyph bank has no ink for. Saying so here beats the "high <= 0"
+            # a sampler raises several frames later.
+            raise RuntimeError(
+                "no renderable texts: the glyph bank cannot draw any of them"
+            )
+        self.count = int(count)
+        self.seed = seed
+        self._rng = None
+
+        # Measure the natural width distribution once, then sample from it.
+        rng = np.random.default_rng(seed)
+        measured = []
+        for _ in range(max(32, calibration)):
+            image, text = self.source.sample(rng)
+            if image is not None and text:
+                measured.append(image.width)
+        if not measured:
+            raise RuntimeError("the glyph bank produced no lines to calibrate on")
+        self._widths = rng.choice(
+            np.asarray(measured, dtype=np.int64), size=self.count, replace=True
+        )
+
+    def __len__(self) -> int:
+        return self.count
+
+    @property
+    def widths(self) -> np.ndarray:
+        """The widths promised to the sampler, before anything is drawn."""
+        return self._widths
+
+    def _rng_for_worker(self) -> np.random.Generator:
+        # Fresh content every access, but seeded per worker so two workers never
+        # walk the same sequence. Entropy is mixed in deliberately: the width is
+        # already fixed, so the content is free to differ between epochs, and
+        # that is the whole point of generating rather than storing.
+        if self._rng is None:
+            info = torch.utils.data.get_worker_info()
+            wid = info.id if info is not None else 0
+            self._rng = np.random.default_rng([self.seed, wid, os.getpid()])
+        return self._rng
+
+    def __getitem__(self, index):
+        rng = self._rng_for_worker()
+        target = int(self._widths[int(index) % self.count])
+        image, text = self.source.sample(rng)
+        if image is None or not text:
+            # A bad draw must still honour its width, or the batch overruns.
+            return np.full((LINE_HEIGHT, target), 255, dtype=np.uint8), ""
+        if image.width != target:
+            image = image.resize((max(8, target), image.height), Image.BICUBIC)
+        return np.asarray(image.convert("L"), dtype=np.uint8), text
 
 
 # Real handwriting in other scripts, used to teach the encoder what pen on

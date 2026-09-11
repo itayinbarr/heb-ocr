@@ -20,7 +20,8 @@ from torch.utils.data import DataLoader
 
 from .charset import BLANK, Charset
 from .data.synth import (
-    LineDataset, MixedLineDataset, PixelBudgetSampler, build_glyph_lines,
+    EndlessGlyphLines, LineDataset, MixedLineDataset, PixelBudgetSampler,
+    build_glyph_lines,
     ALL_REAL_INK, collate, image_widths, load_diffusionpen, load_real_ink,
 )
 from .decode import greedy_decode
@@ -44,6 +45,7 @@ class Config:
     max_concat: int = 3
     glyph_lines: int = 0
     real_hebrew: tuple = ()
+    endless_glyphs: bool = False
     real_ink: tuple = ()
     real_ink_cap: int | None = None
     eval_batch_size: int = 12
@@ -197,6 +199,9 @@ def main() -> int:
                     help="probability of joining lines to match benchmark line lengths")
     ap.add_argument("--glyph-lines", type=int, default=0,
                     help="how many training lines to compose from real HHD glyphs")
+    ap.add_argument("--endless-glyphs", action="store_true",
+                    help="generate glyph lines on demand instead of pre-composing "
+                         "them, so --glyph-lines can exceed what fits in memory")
     ap.add_argument("--real-hebrew", default="", metavar="NAMES",
                     help="real Hebrew corpora to mix in: pinkas, biblia, all, or "
                          "none. BiblIA is CC-BY-NC-SA-4.0 and changes what the "
@@ -227,6 +232,7 @@ def main() -> int:
         epochs=args.epochs, lr=args.lr,
         pixel_budget=args.pixel_budget, max_batch=args.max_batch, concat_prob=args.concat_prob,
         glyph_lines=args.glyph_lines, real_hebrew=_hebrew_choice(args.real_hebrew),
+        endless_glyphs=args.endless_glyphs,
         real_ink=(ALL_REAL_INK if args.real_ink.strip() == "all"
                   else tuple(x for x in args.real_ink.split(",") if x)),
         real_ink_cap=args.real_ink_cap,
@@ -294,9 +300,22 @@ def main() -> int:
         # Real handwritten ink. DiffusionPen's generated strokes are the one
         # thing the model never sees a real version of, and that shows up as the
         # gap between synthetic validation CER and benchmark CER.
-        print(f"composing {cfg.glyph_lines} lines from real HHD glyphs...", flush=True)
-        glyph_items = build_glyph_lines(train_rows["text"], cfg.glyph_lines, seed=cfg.seed)
-        print(f"  got {len(glyph_items)} glyph lines", flush=True)
+        if cfg.endless_glyphs:
+            # Past a few tens of thousands, pre-composing stops being possible:
+            # the arrays live in memory and every dataloader worker inherits
+            # them. Generating per access costs nothing to store and never
+            # repeats an arrangement.
+            from .data.glyphs import GlyphBank
+
+            print(f"generating {cfg.glyph_lines} glyph lines on demand...", flush=True)
+            glyph_items = EndlessGlyphLines(
+                GlyphBank.load("train"), train_rows["text"], cfg.glyph_lines, seed=cfg.seed
+            )
+            print(f"  width distribution calibrated over {len(glyph_items)} lines", flush=True)
+        else:
+            print(f"composing {cfg.glyph_lines} lines from real HHD glyphs...", flush=True)
+            glyph_items = build_glyph_lines(train_rows["text"], cfg.glyph_lines, seed=cfg.seed)
+            print(f"  got {len(glyph_items)} glyph lines", flush=True)
 
     train_ds = MixedLineDataset(
         train_rows, glyph_items, charset, train=True,
