@@ -45,6 +45,7 @@ class Config:
     max_concat: int = 3
     glyph_lines: int = 0
     real_hebrew: tuple = ()
+    real_hebrew_split: str = "all"
     endless_glyphs: bool = False
     real_ink: tuple = ()
     real_ink_cap: int | None = None
@@ -199,6 +200,11 @@ def main() -> int:
                     help="probability of joining lines to match benchmark line lengths")
     ap.add_argument("--glyph-lines", type=int, default=0,
                     help="how many training lines to compose from real HHD glyphs")
+    ap.add_argument("--real-hebrew-split", default="all", choices=["all", "train", "test"],
+                    help="which partition of the real Hebrew corpora to train on. "
+                         "Use 'train' whenever a fine-tune or an evaluation will "
+                         "later select on the held-out half, or the selection set "
+                         "is not actually held out")
     ap.add_argument("--endless-glyphs", action="store_true",
                     help="generate glyph lines on demand instead of pre-composing "
                          "them, so --glyph-lines can exceed what fits in memory")
@@ -232,7 +238,7 @@ def main() -> int:
         epochs=args.epochs, lr=args.lr,
         pixel_budget=args.pixel_budget, max_batch=args.max_batch, concat_prob=args.concat_prob,
         glyph_lines=args.glyph_lines, real_hebrew=_hebrew_choice(args.real_hebrew),
-        endless_glyphs=args.endless_glyphs,
+        endless_glyphs=args.endless_glyphs, real_hebrew_split=args.real_hebrew_split,
         real_ink=(ALL_REAL_INK if args.real_ink.strip() == "all"
                   else tuple(x for x in args.real_ink.split(",") if x)),
         real_ink_cap=args.real_ink_cap,
@@ -271,7 +277,9 @@ def main() -> int:
         from .data.hebrew_ink import HebrewInkSource, load_hebrew_ink
 
         print(f"loading real Hebrew ink: {', '.join(cfg.real_hebrew)}", flush=True)
-        hebrew_rows = load_hebrew_ink(cfg.real_hebrew, seed=cfg.seed)
+        hebrew_rows = load_hebrew_ink(
+            cfg.real_hebrew, seed=cfg.seed, split=cfg.real_hebrew_split
+        )
         if hebrew_rows:
             source = HebrewInkSource(hebrew_rows)
             extra_sources.append(source)

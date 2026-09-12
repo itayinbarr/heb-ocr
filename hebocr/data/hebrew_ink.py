@@ -191,11 +191,50 @@ def _usable(text: str) -> str | None:
     return text if hebrew >= max(1, len(text.replace(" ", "")) * 0.5) else None
 
 
-def _read_pinkas(archive: Path):
+
+def _pinkas_split(z: zipfile.ZipFile, split: str) -> set[str] | None:
+    """Pinkas ships train_set.txt and test_set.txt, each a list of XML names."""
+    if split == "all":
+        return None
+    name = next((n for n in z.namelist()
+                 if n.lower().endswith(f"{'train' if split == 'train' else 'test'}_set.txt")), None)
+    if name is None:
+        return None
+    return {line.strip() for line in z.read(name).decode("utf-8", "replace").splitlines()
+            if line.strip()}
+
+
+def _biblia_split(z: zipfile.ZipFile, split: str) -> set[str] | None:
+    """BiblIA's catalogue.txt carries a test/train column per page."""
+    if split == "all":
+        return None
+    name = next((n for n in z.namelist() if n.lower().endswith("catalogue.txt")), None)
+    if name is None:
+        return None
+    rows = z.read(name).decode("utf-8", "replace").splitlines()
+    if not rows:
+        return None
+    header = rows[0].split("\t")
+    try:
+        col = header.index("test/train")
+    except ValueError:
+        return None
+    keep = set()
+    for row in rows[1:]:
+        parts = row.split("\t")
+        if len(parts) > col and parts[col].strip() == split:
+            keep.add(Path(parts[0].strip()).stem)
+    return keep or None
+
+
+def _read_pinkas(archive: Path, split: str = "all"):
     """PAGE XML: every TextLine carries its own TextEquiv/Unicode."""
     with zipfile.ZipFile(archive) as z:
+        keep = _pinkas_split(z, split)
         pages = sorted(n for n in z.namelist() if n.lower().endswith(".xml"))
         for xml_name in pages:
+            if keep is not None and Path(xml_name).name not in keep:
+                continue
             image_name = xml_name[: -len(".xml")] + ".jpg"
             if image_name not in z.namelist():
                 continue
@@ -219,9 +258,10 @@ def _read_pinkas(archive: Path):
                     yield crop, text
 
 
-def _read_biblia(archive: Path):
+def _read_biblia(archive: Path, split: str = "all"):
     """ALTO 4.2: a TextLine carries a Shape/Polygon and its String elements."""
     with zipfile.ZipFile(archive) as z:
+        keep = _biblia_split(z, split)
         names = z.namelist()
         images = {
             Path(n).stem: n for n in names
@@ -230,6 +270,8 @@ def _read_biblia(archive: Path):
         for xml_name in sorted(n for n in names if n.lower().endswith(".xml")):
             stem = Path(xml_name).stem
             if stem not in images:
+                continue
+            if keep is not None and stem not in keep:
                 continue
             try:
                 root = ET.fromstring(z.read(xml_name))
@@ -280,8 +322,8 @@ SOURCES = {
 RELEASE_SAFE = ("pinkas",)
 
 
-def _cache_path(root: Path, name: str, match_density: bool, seed: int) -> Path:
-    tag = f"{name}-h{LINE_HEIGHT}-{'d' if match_density else 'raw'}-s{seed}"
+def _cache_path(root: Path, name: str, match_density: bool, seed: int, split: str) -> Path:
+    tag = f"{name}-{split}-h{LINE_HEIGHT}-{'d' if match_density else 'raw'}-s{seed}"
     return root / "cache" / f"{tag}.npz"
 
 
@@ -321,6 +363,7 @@ def load_hebrew_ink(
     match_density: bool = True,
     seed: int = 0,
     cache: bool = True,
+    split: str = "all",
 ):
     """Line crops and transcriptions from the real Hebrew corpora.
 
@@ -347,17 +390,17 @@ def load_hebrew_ink(
             print(f"  {name}: {archive} not present, skipping", flush=True)
             continue
 
-        cached = _cache_path(root, name, match_density, seed)
+        cached = _cache_path(root, name, match_density, seed, split)
         if cache and cached.exists():
             found = _restore(cached)
             rows.extend(found)
-            print(f"  {name}: {len(found)} real Hebrew lines ({licence}, cached)", flush=True)
+            print(f"  {name}[{split}]: {len(found)} real Hebrew lines ({licence}, cached)", flush=True)
             if limit is not None and len(rows) >= limit:
                 return rows[:limit]
             continue
 
         produced = []
-        for image, text in reader(archive):
+        for image, text in reader(archive, split):
             if match_density:
                 image = _match_density(image, text, TARGET_PX_PER_CHAR, rng)
             scale = LINE_HEIGHT / max(image.height, 1)
@@ -369,7 +412,7 @@ def load_hebrew_ink(
         if cache:
             _store(produced, cached)
         rows.extend(produced)
-        print(f"  {name}: {len(produced)} real Hebrew lines ({licence})", flush=True)
+        print(f"  {name}[{split}]: {len(produced)} real Hebrew lines ({licence})", flush=True)
         if limit is not None and len(rows) >= limit:
             return rows[:limit]
     return rows
