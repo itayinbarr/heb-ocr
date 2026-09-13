@@ -92,6 +92,9 @@ def main() -> int:
     ap.add_argument("--eval-every", type=int, default=200)
     ap.add_argument("--batch-lines", type=int, default=16)
     ap.add_argument("--corpora", default="all")
+    ap.add_argument("--heldout-limit", type=int, default=0,
+                    help="score only this many held-out lines; 0 means all of them. "
+                         "For smoke tests, not for a real selection")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
@@ -104,6 +107,9 @@ def main() -> int:
     heb_train = load_hebrew_ink(names, split="train", seed=args.seed)
     print("loading real Hebrew, held-out test split", flush=True)
     heb_val = load_hebrew_ink(names, split="test", seed=args.seed)
+    if args.heldout_limit:
+        heb_val = heb_val[: args.heldout_limit]
+        print(f"  WARNING: scoring only {len(heb_val)} held-out lines", flush=True)
     print(f"  {len(heb_train)} train, {len(heb_val)} held out", flush=True)
 
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
@@ -138,12 +144,16 @@ def main() -> int:
     for step in range(1, args.steps + 1):
         picks = [heb_ds[int(i)] for i in rng.integers(len(heb_ds), size=n_heb)]
         picks += [reh_ds[int(i)] for i in rng.integers(len(reh_ds), size=n_reh)]
-        images, targets, lengths, target_lengths = collate(picks)
+        batch = collate(picks)
 
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):
-            logprobs = model(images.to(device))
-        loss = ctc(logprobs.float().permute(1, 0, 2), targets.to(device),
-                   model.output_lengths(lengths).to(device), target_lengths.to(device))
+            logprobs = model(batch.images.to(device))
+        loss = ctc(
+            logprobs.float().permute(1, 0, 2),
+            batch.targets.to(device),
+            model.output_lengths(batch.widths).to(device),
+            batch.target_lengths.to(device),
+        )
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -151,14 +161,15 @@ def main() -> int:
 
         if step % args.eval_every == 0:
             report = evaluate(model, charset, heb_val, device)
-            history.append({"step": step, "loss": float(loss), "heldout_cer": report.cer_median})
+            history.append({"step": step, "loss": float(loss.detach()),
+                            "heldout_cer": report.cer_median})
             flag = ""
             if report.cer_median < best:
                 best, best_step = report.cer_median, step
                 torch.save({"model": model.state_dict(), "charset": charset.chars,
                             "config": state.get("config", {}), "step": step}, out / "best.pt")
                 flag = "  <- best"
-            print(f"  step {step:>5}  loss {float(loss):.4f}  "
+            print(f"  step {step:>5}  loss {float(loss.detach()):.4f}  "
                   f"held-out CER {report.cer_median:.4f}{flag}", flush=True)
             (out / "history.json").write_text(json.dumps(history, indent=2))
 
