@@ -79,7 +79,13 @@ class Recognizer:
             )
         self.model.load_state_dict(state["model"])
         self.model.to(self.device).eval()
-        self.trained_epochs = state.get("epoch", -1) + 1
+        # A checkpoint from a fine-tune counts steps, not epochs, and
+        # export_model.py carries the missing field through as None rather than
+        # dropping it. `.get(k, default)` does not help when the key is present
+        # and null, which is how this first crashed on a released file.
+        epoch = state.get("epoch")
+        self.trained_epochs = (epoch + 1) if isinstance(epoch, int) else 0
+        self.trained_steps = state.get("step")
 
     @torch.no_grad()
     def read(

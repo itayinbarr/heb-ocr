@@ -90,8 +90,22 @@ def main() -> int:
     ap.add_argument("--lr", type=float, default=2e-5)
     ap.add_argument("--steps", type=int, default=2000)
     ap.add_argument("--eval-every", type=int, default=200)
-    ap.add_argument("--batch-lines", type=int, default=16)
+    ap.add_argument("--batch-lines", type=int, default=16,
+                    help="upper bound on lines per step; the pixel budget usually "
+                         "binds first")
+    ap.add_argument("--pixel-budget", type=int, default=22000,
+                    help="lines x width-of-widest, the same budget training uses")
     ap.add_argument("--corpora", default="all")
+    ap.add_argument("--train-split", default="train", choices=["train", "all"],
+                    help="'train' holds out the corpus test partition for selection. "
+                         "'all' trains on every line, which is more data and leaves "
+                         "nothing to select on, so it requires --fixed-steps")
+    ap.add_argument("--fixed-steps", type=int, default=0,
+                    help="stop at this step and keep that checkpoint, selecting "
+                         "nothing. Required with --train-split all: the settings "
+                         "must be carried over from a run that did have a held-out "
+                         "set, the way you refit on train+val after choosing "
+                         "hyperparameters on val")
     ap.add_argument("--heldout-limit", type=int, default=0,
                     help="score only this many held-out lines; 0 means all of them. "
                          "For smoke tests, not for a real selection")
@@ -103,10 +117,18 @@ def main() -> int:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     names = ("pinkas", "biblia") if args.corpora == "all" else tuple(args.corpora.split(","))
-    print("loading real Hebrew, train split", flush=True)
-    heb_train = load_hebrew_ink(names, split="train", seed=args.seed)
-    print("loading real Hebrew, held-out test split", flush=True)
+    if args.train_split == "all" and not args.fixed_steps:
+        ap.error("--train-split all trains on the lines that would otherwise be "
+                 "held out, so nothing is left to select on. Pass --fixed-steps "
+                 "with the step count that won on a held-out run.")
+
+    print(f"loading real Hebrew, {args.train_split} split", flush=True)
+    heb_train = load_hebrew_ink(names, split=args.train_split, seed=args.seed)
+    print("loading real Hebrew, test partition", flush=True)
     heb_val = load_hebrew_ink(names, split="test", seed=args.seed)
+    if args.train_split == "all":
+        print("  NOTE: these lines are IN the training set for this run. The CER "
+              "printed below is a training-set number and selects nothing.", flush=True)
     if args.heldout_limit:
         heb_val = heb_val[: args.heldout_limit]
         print(f"  WARNING: scoring only {len(heb_val)} held-out lines", flush=True)
@@ -138,12 +160,37 @@ def main() -> int:
 
     n_heb = max(1, int(round(args.batch_lines * args.hebrew_ratio)))
     n_reh = max(1, args.batch_lines - n_heb)
-    print(f"each step: {n_heb} real Hebrew + {n_reh} rehearsal lines, lr {args.lr}", flush=True)
+    print(f"each step: up to {n_heb} real Hebrew + {n_reh} rehearsal lines, "
+          f"lr {args.lr}, pixel budget {args.pixel_budget}", flush=True)
+
+    def take(dataset, count):
+        """Draw lines, then drop whatever does not fit the pixel budget.
+
+        Batching by line count is what OOMed the first attempt at this sweep,
+        and it is the same mistake `PixelBudgetSampler` exists to prevent: these
+        widths span 200 to 2560 px at a 64 px height, so sixteen short lines fit
+        easily and sixteen long ones do not fit at all. The budget is
+        lines x width-of-widest, which keeps peak memory roughly flat whatever
+        the draw happens to contain.
+        """
+        picked, widest = [], 0
+        for i in rng.integers(len(dataset), size=count * 2):
+            item = dataset[int(i)]
+            width = item[0].shape[-1]
+            nxt = max(widest, width)
+            if picked and (len(picked) + 1) * nxt > args.pixel_budget:
+                continue
+            picked.append(item)
+            widest = nxt
+            if len(picked) >= count:
+                break
+        return picked
 
     start = time.time()
     for step in range(1, args.steps + 1):
-        picks = [heb_ds[int(i)] for i in rng.integers(len(heb_ds), size=n_heb)]
-        picks += [reh_ds[int(i)] for i in rng.integers(len(reh_ds), size=n_reh)]
+        picks = take(heb_ds, n_heb) + take(reh_ds, n_reh)
+        if len(picks) < 2:
+            continue
         batch = collate(picks)
 
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):
@@ -159,12 +206,24 @@ def main() -> int:
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
 
+        if args.fixed_steps and step == args.fixed_steps:
+            # Carried-over settings: keep this checkpoint whatever it scores.
+            torch.save({"model": model.state_dict(), "charset": charset.chars,
+                        "config": state.get("config", {}), "step": step}, out / "best.pt")
+            report = evaluate(model, charset, heb_val, device)
+            print(f"  step {step:>5}  stopped at --fixed-steps, "
+                  f"train-set CER {report.cer_median:.4f}", flush=True)
+            best, best_step = report.cer_median, step
+            break
+
         if step % args.eval_every == 0:
             report = evaluate(model, charset, heb_val, device)
             history.append({"step": step, "loss": float(loss.detach()),
                             "heldout_cer": report.cer_median})
             flag = ""
-            if report.cer_median < best:
+            if args.fixed_steps:
+                pass
+            elif report.cer_median < best:
                 best, best_step = report.cer_median, step
                 torch.save({"model": model.state_dict(), "charset": charset.chars,
                             "config": state.get("config", {}), "step": step}, out / "best.pt")

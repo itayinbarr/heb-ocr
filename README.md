@@ -8,8 +8,9 @@ entirely on synthetic Hebrew handwriting, plus a classical segment-then-recogniz
 pipeline for full-page mode. Everything runs on one 8 GB GPU.
 
 **Released weights: [`itayinbar/Mishkefet-v1`](https://huggingface.co/itayinbar/Mishkefet-v1)**,
-30.2M parameters, second of nine on the leaderboard's line mode at 0.213 median
-CER, third of nine on full-page mode at 0.349 word coverage. It runs on a CPU,
+30.2M parameters. Second of nine on the leaderboard's line mode at 0.175 median
+CER; on full-page mode it posts the best page CER on the board (0.331) and ties
+gpt-5.6-sol at the top on word coverage (0.463 against 0.462). It runs on a CPU,
 needs no API key, and costs nothing per line.
 
 ## What the target actually is
@@ -146,17 +147,18 @@ evaluated on the held-out benchmark. Full tables and every prediction are in
 |---|---|---|---|
 | *human, 2nd read* | *0.000* | *0.000* | *225* |
 | gemini-flash | 0.119 | - | 212 |
-| **this model** (beam + char LM + TTA 3) | **0.213** | **0.214** | 223 |
+| **this model** | **0.175** | **0.177** | 224 |
 | gemini-flash-lite | 0.280 | 0.280 | 225 |
 | gpt-5.6-sol | 0.440 | - | 225 |
 | claude-opus-5 | 0.692 | - | 225 |
 
-Ahead of gemini-flash-lite by 0.067 on **both** readings, so the ranking does
+Ahead of gemini-flash-lite by 0.105 on **both** readings, so the ranking does
 not depend on the leaderboard's blank-dropping rule.
 
-**Full-page mode, 3rd of 9**: word coverage 0.349, page CER 0.413, using the
-word prior rather than TTA. Ahead of claude-opus-5 at 0.335, by 0.014, which is
-thin enough that the maintainers' harness should settle it.
+**Full-page mode**: page CER 0.331, which is the best figure on that board, 6
+percent clear of gemini-flash-lite's 0.353. Word coverage 0.463 against
+gpt-5.6-sol's 0.462 is a tie rather than a win: 0.0011 on a metric this repo
+reconstructs is inside its own error, and the maintainers' harness decides it.
 
 ### How it was trained
 
@@ -181,7 +183,8 @@ Every large gain came from making the training ink more like real ink.
 | plus 11k real Arabic and English lines | 0.273 |
 | plus 45k more real lines (Norwegian, French) | 0.234 |
 | plus pretraining on 551k real lines across 8 scripts | 0.222 |
-| plus multi-scale reading at decode time, no retraining | **0.213** |
+| plus multi-scale reading and a word prior at decode time | 0.188 |
+| plus 943 lines of real Hebrew cursive | **0.175** |
 
 **Real handwriting in languages the model cannot read improves Hebrew.** That
 is the finding this project rests on, confirmed five times at increasing scale.
@@ -292,13 +295,16 @@ with your own account first.
 
 ## Data and licensing
 
-No real Hebrew handwriting was used for training, because none is published with
-line-level transcriptions. The ivrit.ai benchmark is test-only by design and was
-never trained on.
+Two corpora of real Hebrew handwriting with line-level transcriptions are
+published and both are used: 10,219 lines in total. That is the entire public
+supply, and only 943 of it is cursive, the script the benchmark is written in.
+The ivrit.ai benchmark itself is test-only by design and was never trained on.
 
 | dataset | role | license |
 |---|---|---|
 | [`ivrit-ai/hebrew-handwriting-ocr-benchmark`](https://huggingface.co/datasets/ivrit-ai/hebrew-handwriting-ocr-benchmark) | test only, never trained on | ivrit.ai License (gated) |
+| [Pinkas](https://zenodo.org/records/3569694) | 943 lines of real Hebrew cursive, the only such corpus published | CC-BY-4.0 |
+| [BiblIA](https://zenodo.org/records/5167263) | 9,276 lines of real medieval Hebrew square script | CC-BY-NC-SA-4.0 |
 | [`cyttic/diffusionpen-hebrew-handwriting`](https://huggingface.co/datasets/cyttic/diffusionpen-hebrew-handwriting) | 116k synthetic Hebrew lines, 491 writer styles | CC-BY-4.0 |
 | [`sivan22/hebrew-handwritten-dataset`](https://huggingface.co/datasets/sivan22/hebrew-handwritten-dataset) | 25k lines composed from real handwritten Hebrew glyphs | CC-BY-3.0 |
 | [`johnlockejrr/KHATT_v1.0_dataset`](https://huggingface.co/datasets/johnlockejrr/KHATT_v1.0_dataset) | 4,672 real Arabic lines | MIT (as published) |
@@ -315,9 +321,13 @@ intending commercial use should verify those terms upstream rather than relying
 on the mirrors' labels.
 
 **This repository.** The code is MIT (see [`LICENSE`](LICENSE)). The trained
-weights are released separately under CC-BY-4.0, at
-[`itayinbar/Mishkefet-v1`](https://huggingface.co/itayinbar/Mishkefet-v1), to
-respect the attribution terms of the Hebrew training sources.
+weights are released separately under **CC-BY-NC-SA-4.0** at
+[`itayinbar/Mishkefet-v1`](https://huggingface.co/itayinbar/Mishkefet-v1).
+
+That is a change from the CC-BY-4.0 of earlier releases, and it is forced by the
+data. BiblIA is CC-BY-NC-SA-4.0, so a model trained on it inherits NonCommercial
+and ShareAlike. Training with `--real-hebrew pinkas` keeps the permissive terms
+at the cost of 9,276 of the 10,219 real Hebrew lines.
 
 ## Citation
 

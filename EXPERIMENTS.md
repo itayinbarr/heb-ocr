@@ -359,3 +359,99 @@ One observation that mattered more for what came next: the no-SAM arm was still
 improving when its budget ran out, sitting at 0.2857 for four consecutive epochs
 and then dropping to 0.2653 on the last one. It had not converged, which is the
 main reason the long run gets twelve epochs rather than eight.
+
+# Real Hebrew ink, and the fine-tune that followed
+
+Two corpora of real Hebrew handwriting are openly published and this project had
+used neither, on the belief that none existed. That belief was true only of
+modern cursive.
+
+| corpus | lines | script | licence |
+|---|---|---|---|
+| [Pinkas](https://zenodo.org/records/3569694) | 943 | early-modern Ashkenazi cursive | CC-BY-4.0 |
+| [BiblIA](https://zenodo.org/records/5167263) | 9,276 | medieval square, 3 families | CC-BY-NC-SA-4.0 |
+
+Pinkas is the same script class as the benchmark. Hebrew cursive is one system,
+so early-modern quill and modern ballpoint share letterforms; what differs is
+the instrument, the imaging and the language, all of which the augmentation
+already spans. BiblIA is square script, the formal book hand that printed Hebrew
+type was modelled on, and therefore the opposite of the target.
+
+Two defects turned up on the way in, both found by looking at the images.
+
+Cropping a line's polygon *bounding box* captured a third of the line above and
+a third below, because slanted lines have tall boxes. That pairs an image
+holding three lines of ink with a label describing one, which is the same defect
+as an augmentation that blanks the image and keeps the transcription. Lines are
+now masked to the polygon and reframed to what the mask keeps.
+
+Worse, the sources disagree about character density. Measured pixels per
+character at a 64 px line height: benchmark 22.1, DiffusionPen 33.5, Pinkas 8.4.
+The stretch augmentation is deliberately weighted toward compression because it
+was tuned against DiffusionPen being too sparse, so on a source already 2.6x too
+dense it pushes further from the target. Each source is now matched to the
+benchmark's density first.
+
+## The 74-hour run: the domain gap, stated as plainly as it gets
+
+16 epochs, 20.4M samples, 1.27M items an epoch, no SAM.
+
+| epoch | synthetic val CER | benchmark CER |
+|---|---|---|
+| 0 | 0.0652 | 0.2857 |
+| 5 | 0.0526 | 0.2500 |
+| 10 | 0.0435 | 0.2500 |
+| 15 | 0.0345 | 0.2500 |
+
+Validation improved 47 percent across the run. The benchmark reached 0.2500 at
+epoch 5 and never went below it, reading exactly 0.2500 in ten of the last
+eleven epochs. **Two thirds of the training time bought a large gain on
+synthetic Hebrew and nothing measurable on real paper.**
+
+## The fine-tune: data moved it, schedule never did
+
+Rehearsal fine-tuning on Pinkas, selected on the corpus's own held-out
+partition, never on the benchmark. Synthetic validation cannot be used for this:
+fine-tuning toward real Hebrew moves away from synthetic Hebrew, so validation
+degrades exactly as the fine-tune starts working.
+
+| model | lines | steps | line CER | page wcov | page CER |
+|---|---|---|---|---|---|
+| no fine-tune | - | - | 0.1875 | 0.4409 | 0.3420 |
+| fine-tune | 677 | 1200 | 0.2000 | 0.4554 | 0.3675 |
+| **all-Pinkas** | **943** | 1200 | **0.1752** | 0.4630 | **0.3314** |
+| extended | 677 | 2750 | 0.1875 | 0.4438 | 0.4132 |
+| longest | 677 | 5250 | 0.1895 | 0.4421 | 0.4137 |
+| all-Pinkas r0.7 | 943 | 1200 | 0.1875 | **0.4712** | 0.3701 |
+
+Read the first and third rows against the fourth and fifth. **266 extra lines
+bought 0.0123 line CER. 4,050 extra steps bought nothing at all**, and cost
+0.07 page CER.
+
+The held-out curve says the opposite, which is the point. Across the 5,250-step
+run held-out cursive CER fell from 0.3224 to 0.0604, an 81 percent improvement,
+while the benchmark went from 0.1875 to 0.1895. Past roughly 1,200 steps the
+fine-tune stops learning Hebrew cursive and starts memorising one scribal
+corpus, and only the benchmark can see the difference.
+
+## The pattern this project keeps meeting
+
+Five times now, something has improved on the distribution it was optimised
+against and failed to move, or moved backwards, on real paper:
+
+1. TrOCR's pretrained encoder: fit as well as from-scratch, transferred far worse
+2. Frame-averaged ensembling: 0.697 against 0.250, because CTC alignments differ
+3. SAM: better synthetic validation, worse benchmark, at double the cost
+4. The 74-hour run: 47 percent better validation, zero benchmark movement after epoch 5
+5. The extended fine-tune: 81 percent better held-out, zero benchmark movement
+
+The rule that follows, and it has now been paid for five times: **on this
+problem, any improvement measured on something other than the benchmark should
+be assumed neutral until the benchmark is run.** Synthetic validation and
+held-out Pinkas both measure parts of the problem that are already solved.
+
+The corollary is the useful half. Every gain that did survive to the benchmark
+came from adding real ink: foreign scripts at first, then Hebrew cursive. The
+single steepest return in the project is the 266 lines between the 677-line and
+943-line fine-tunes. The constraint is not architecture, schedule, or optimizer.
+It is how many lines of real Hebrew cursive exist, and the answer is 943.

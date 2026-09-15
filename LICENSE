@@ -24,8 +24,18 @@ SOFTWARE.
 
 This license covers the source code in this repository only.
 
-The trained model weights are distributed separately, under CC-BY-4.0, at
-https://huggingface.co/itayinbar/Mishkefet-v1
+The trained model weights are distributed separately, under
+CC-BY-NC-SA-4.0, at https://huggingface.co/itayinbar/Mishkefet-v1
+
+The weights changed licence on 2026-09-15 and this is deliberate rather than an
+oversight. Earlier releases were CC-BY-4.0. The current model is trained on
+BiblIA (https://zenodo.org/records/5167263), which is CC-BY-NC-SA-4.0, and those
+terms propagate: NonCommercial means the weights may not be used commercially,
+and ShareAlike means derivatives carry the same licence.
+
+Anyone who needs permissive terms should train with `--real-hebrew pinkas`,
+which uses only the CC-BY-4.0 corpus. That costs 9,276 of the 10,219 real Hebrew
+lines and will score worse.
 
 The datasets used for training and evaluation carry their own licenses, listed
 in README.md. In particular the ivrit.ai benchmark is gated under the ivrit.ai
