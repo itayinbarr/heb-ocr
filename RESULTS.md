@@ -24,10 +24,11 @@ Pinkas corpus's own held-out partition. Neither ever saw the benchmark.
 | gpt-5.6-luna | 0.735 | 225 |
 | claude-haiku-4-5 | 0.905 | 225 |
 
-Second of nine. Decoding is beam 12, character 6-gram LM at 0.4, three-scale
-TTA and a word prior at 0.2.
+Second of nine. One row, like every other model on the board: the ablation
+below is the same weights at different decode settings, not separate entries.
 
-Every decode configuration, on the same checkpoint:
+Decoding is beam 12, character 6-gram LM at 0.4, three-scale TTA and a word
+prior at 0.2. What each part contributes:
 
 | configuration | CER median | no-drop | micro | word cov | scored |
 |---|---|---|---|---|---|

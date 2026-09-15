@@ -324,10 +324,10 @@ on the mirrors' labels.
 weights are released separately under **CC-BY-NC-SA-4.0** at
 [`itayinbar/Mishkefet-v1`](https://huggingface.co/itayinbar/Mishkefet-v1).
 
-That is a change from the CC-BY-4.0 of earlier releases, and it is forced by the
-data. BiblIA is CC-BY-NC-SA-4.0, so a model trained on it inherits NonCommercial
-and ShareAlike. Training with `--real-hebrew pinkas` keeps the permissive terms
-at the cost of 9,276 of the 10,219 real Hebrew lines.
+The data requires those terms rather than the author preferring them: BiblIA is
+CC-BY-NC-SA-4.0, so a model trained on it inherits NonCommercial and ShareAlike.
+Training with `--real-hebrew pinkas` yields permissive weights at the cost of
+9,276 of the 10,219 real Hebrew lines.
 
 ## Citation
 
