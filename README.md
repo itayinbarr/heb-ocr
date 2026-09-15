@@ -4,14 +4,15 @@ Hebrew handwriting recognition (HTR) for the
 [ivrit.ai Hebrew Handwriting OCR leaderboard](https://huggingface.co/spaces/ivrit-ai/hebrew-handwriting-ocr-leaderboard).
 
 A character-level CTC line recognizer (CNN + ViT encoder, after HTR-VT) trained
-entirely on synthetic Hebrew handwriting, plus a classical segment-then-recognize
-pipeline for full-page mode. Everything runs on one 8 GB GPU.
+on synthetic Hebrew plus every line of real Hebrew handwriting that has been
+published, with a classical segment-then-recognize pipeline for full-page mode.
+Everything runs on one 8 GB GPU.
 
 **Released weights: [`itayinbar/Mishkefet-v1`](https://huggingface.co/itayinbar/Mishkefet-v1)**,
-30.2M parameters. Second of nine on the leaderboard's line mode at 0.175 median
-CER; on full-page mode it posts the best page CER on the board (0.331) and ties
-gpt-5.6-sol at the top on word coverage (0.463 against 0.462). It runs on a CPU,
-needs no API key, and costs nothing per line.
+30.2M parameters. **Full-page mode: the best page CER on the board, 0.331**, and
+0.463 word coverage, which ties gpt-5.6-sol at the top. **Line mode: second of
+nine at 0.175 median CER.** It runs on a CPU, needs no API key, and costs nothing
+per line.
 
 ## What the target actually is
 
@@ -89,12 +90,13 @@ contact with the actual leaderboard:
   (CC-BY-4.0) is 149,952 synthetic Hebrew handwriting lines in 491 writer styles,
   writer-independent splits. That is the "build a data engine" stage, prebuilt.
 
-## The central constraint: no in-domain data
+## The central constraint: 943 lines
 
-There is no public corpus of real modern Hebrew cursive with line-level
-transcriptions. So **every training image here is synthetic**, and the whole
-modelling problem is the domain gap to photographs of real paper. Two measured
-gaps drive the augmentation:
+Exactly 943 lines of real Hebrew cursive have been published with line-level
+transcriptions, and all of them are used here. Everything else is synthetic, or
+real ink in another script, or real Hebrew in a script four centuries old. So
+the modelling problem is still the domain gap to photographs of real paper, and
+the augmentation is still what closes most of it. Two measured gaps drive it:
 
 - **Line length.** DiffusionPen tops out at 72 characters; 20% of benchmark lines
   are longer, up to 111. Fixed by joining lines (`concat_rtl`), *right-to-left*,
@@ -162,7 +164,7 @@ reconstructs is inside its own error, and the maintainers' harness decides it.
 
 ### How it was trained
 
-Two stages, because no public corpus of real modern Hebrew cursive exists:
+Two stages, then a fine-tune on the real cursive:
 
 1. **Pretrain on ink.** 692k lines, of which 551k are real handwriting in
    Arabic, English, Norwegian, French, German, Latin and Spanish. Hebrew is
@@ -277,11 +279,16 @@ with your own account first.
 
 ## Honest limitations
 
-- **No in-domain validation set.** Checkpoints are selected on synthetic
-  validation CER, never on the benchmark. The benchmark is scored during training
-  but only ever *logged*, selecting on it would make every number here inflated.
-  The risk this leaves: the checkpoint best on synthetic data need not be best on
-  real paper.
+- **943 lines of in-domain training data, and that is the whole published
+  supply.** Everything else is synthetic, another script, or another century.
+  This is the dominant source of remaining error.
+- **Selection never used the benchmark.** The base model is selected on synthetic
+  validation CER and the fine-tune on the Pinkas corpus's own held-out partition.
+  Both are proxies and on this problem proxies mislead: the 74-hour run improved
+  synthetic validation 47 percent while the benchmark sat still, and the
+  fine-tune improved held-out cursive 81 percent while the benchmark sat still.
+  The shipped checkpoint is therefore not the one that scored best on the
+  benchmark, by design.
 - **The scorer is a reconstruction.** `ivrit-ai/ocr-eval` is private. Scoring is
   maintainer-run, so the official number for any model is whatever their harness
   says, not what this repo prints.
@@ -320,14 +327,13 @@ has historically been restricted to non-commercial research use. Anyone
 intending commercial use should verify those terms upstream rather than relying
 on the mirrors' labels.
 
-**This repository.** The code is MIT (see [`LICENSE`](LICENSE)). The trained
-weights are released separately under **CC-BY-NC-SA-4.0** at
-[`itayinbar/Mishkefet-v1`](https://huggingface.co/itayinbar/Mishkefet-v1).
+**Code is MIT, weights are CC-BY-NC-SA-4.0.** They differ because the data
+requires it: BiblIA is NonCommercial-ShareAlike and those terms propagate to
+anything trained on it. Training with `--real-hebrew pinkas` yields permissive
+weights at the cost of 9,276 of the 10,219 real Hebrew lines.
 
-The data requires those terms rather than the author preferring them: BiblIA is
-CC-BY-NC-SA-4.0, so a model trained on it inherits NonCommercial and ShareAlike.
-Training with `--real-hebrew pinkas` yields permissive weights at the cost of
-9,276 of the 10,219 real Hebrew lines.
+[`NOTICE.md`](NOTICE.md) sets out all three licences and the one upstream
+caveat worth reading before any commercial use.
 
 ## Citation
 

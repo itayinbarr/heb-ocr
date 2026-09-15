@@ -64,5 +64,8 @@ anyway and it is better they come from us:
   no-drop median alongside (as `hebocr.metrics` does) would make the board
   harder to game.
 - Training data provenance, in case they want to publish a baseline:
-  `cyttic/diffusionpen-hebrew-handwriting` (CC-BY-4.0) is the entire training
-  set; no ivrit.ai data was used for training.
+  `cyttic/diffusionpen-hebrew-handwriting` (CC-BY-4.0) supplies the synthetic
+  Hebrew, and the real Hebrew is Pinkas (CC-BY-4.0) plus BiblIA
+  (CC-BY-NC-SA-4.0). No ivrit.ai data was used for training. BiblIA's
+  NonCommercial-ShareAlike terms propagate, which is why the released weights are
+  CC-BY-NC-SA-4.0 rather than permissive.
